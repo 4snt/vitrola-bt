@@ -1,5 +1,6 @@
-//! A janela do Vitrola BT: um tape deck / receiver dos anos 70 desenhado à mão
-//! sobre uma tela de 900 x 620 unidades que escala com a janela.
+//! A janela do Vitrola BT: um sistema hi-fi empilhado num gabinete de nogueira
+//! (DAC Bluetooth, receiver, equalizador gráfico e tape deck), desenhado à mão
+//! sobre uma tela de 900 x 906 unidades que escala com a janela.
 
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
@@ -17,7 +18,7 @@ use crate::prefs::Prefs;
 use crate::sbc;
 
 const LARG: f32 = 900.0;
-const ALT: f32 = 780.0;
+const ALT: f32 = 906.0;
 const VOLTA_FITA_S: f32 = 30.0 * 60.0;
 
 /// Botão de função: rótulo, dica e o campo dos ajustes que ele liga/desliga.
@@ -37,6 +38,7 @@ struct Visao {
     gravando: Option<(PathBuf, Instant)>,
     inicio_play: Option<Instant>,
     medidas: Medidas,
+    medidas_saida: Medidas,
     medindo: bool,
 }
 
@@ -48,9 +50,12 @@ pub struct App {
     tem_bandeja: bool,
     aluminio: TextureHandle,
     madeira: TextureHandle,
+    /// Ponteiros dos VU: entrada (DAC) e saída (receiver).
     agulha: [f32; 2],
-    /// Última vez que cada canal encostou no máximo (lâmpada PEAK).
+    agulha_saida: [f32; 2],
+    /// Última vez que cada canal encostou no máximo (lâmpada PEAK): entrada e saída.
     pico_canal: [Option<Instant>; 2],
+    pico_saida: [Option<Instant>; 2],
     bandas: [f32; 10],
     picos: [f32; 10],
     pico_t: [Instant; 10],
@@ -88,7 +93,9 @@ impl App {
             aluminio,
             madeira,
             agulha: [-40.0; 2],
+            agulha_saida: [-40.0; 2],
             pico_canal: [None; 2],
+            pico_saida: [None; 2],
             bandas: [PISO_DB; 10],
             picos: [PISO_DB; 10],
             pico_t: [agora; 10],
@@ -118,6 +125,7 @@ impl App {
             gravando: e.gravando.clone(),
             inicio_play: e.inicio_play,
             medidas: e.medidas,
+            medidas_saida: e.medidas_saida,
             medindo: e.ultima_medida.is_some_and(|t| t.elapsed() < Duration::from_millis(500)),
         }
     }
@@ -132,13 +140,18 @@ impl App {
         let k = 1.0 - (-dt / 0.3).exp();
         for c in 0..2 {
             self.agulha[c] += (alvo_vu(v.medidas.rms_db[c]) - self.agulha[c]) * k;
+            self.agulha_saida[c] += (alvo_vu(v.medidas_saida.rms_db[c]) - self.agulha_saida[c]) * k;
             if v.medindo && v.medidas.pico_db[c] > -1.0 {
                 self.pico_canal[c] = Some(Instant::now());
+            }
+            if v.medindo && v.medidas_saida.pico_db[c] > -1.0 {
+                self.pico_saida[c] = Some(Instant::now());
             }
         }
         let agora = Instant::now();
         for i in 0..10 {
-            let alvo = if v.medindo { v.medidas.bandas_db[i] } else { PISO_DB - 20.0 };
+            // o analisador do equalizador mostra a SAÍDA (depois do EQ)
+            let alvo = if v.medindo { v.medidas_saida.bandas_db[i] } else { PISO_DB - 20.0 };
             self.bandas[i] = if alvo > self.bandas[i] { alvo } else { (self.bandas[i] - 40.0 * dt).max(alvo) };
             if self.bandas[i] >= self.picos[i] {
                 self.picos[i] = self.bandas[i];
@@ -167,71 +180,58 @@ impl App {
         let r_ = |x: f32, y: f32, w: f32, h: f32| Rect::from_min_size(p_(x, y), vec2(w * s, h * s));
         let fonte = |t: f32| FontId::proportional(t * s);
         let p = ui.painter().clone();
+        let tinta = rgb(34, 34, 34);
 
-        // gabinete: laterais de nogueira e frente de alumínio escovado
-        p.rect_filled(area, Rounding::ZERO, rgb(26, 16, 9));
+        // gabinete de nogueira com o rack de três aparelhos
+        p.rect_filled(area, Rounding::ZERO, rgb(18, 12, 7));
         let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
-        p.image(self.madeira.id(), r_(0.0, 0.0, 30.0, ALT), uv, Color32::WHITE);
-        p.image(self.madeira.id(), r_(LARG - 30.0, 0.0, 30.0, ALT), uv, Color32::WHITE);
-        let frente = r_(30.0, 0.0, LARG - 60.0, ALT);
-        p.image(self.aluminio.id(), frente, uv, Color32::WHITE);
-        d::grad_v(
-            &p,
-            frente,
-            &[(0.0, Color32::from_white_alpha(40)), (0.5, Color32::TRANSPARENT), (1.0, Color32::from_black_alpha(45))],
-        );
-        p.line_segment(
-            [frente.left_top(), frente.right_top()],
-            egui::Stroke::new(2.0_f32, Color32::from_white_alpha(200)),
-        );
-        p.line_segment(
-            [frente.left_bottom(), frente.right_bottom()],
-            egui::Stroke::new(3.0_f32, Color32::from_black_alpha(90)),
-        );
-        for (x, y) in [(46.0, 14.0), (LARG - 46.0, 14.0), (46.0, ALT - 14.0), (LARG - 46.0, ALT - 14.0)] {
-            d::parafuso(&p, p_(x, y), 4.0 * s);
+        for r in [r_(0.0, 0.0, 28.0, ALT - 28.0), r_(LARG - 28.0, 0.0, 28.0, ALT - 28.0)] {
+            p.image(self.madeira.id(), r, uv, Color32::WHITE);
         }
+        for r in [r_(0.0, 0.0, LARG, 12.0), r_(0.0, ALT - 48.0, LARG, 20.0)] {
+            p.image(self.madeira.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 0.04)), Color32::WHITE);
+        }
+        p.rect_filled(r_(28.0, 12.0, LARG - 56.0, ALT - 60.0), Rounding::ZERO, rgb(10, 8, 6));
 
-        // janela 1: VU L/R + espectro
-        d::vidro(&p, r_(50.0, 26.0, 800.0, 176.0), s);
-        d::vu(&p, r_(64.0, 40.0, 214.0, 148.0), self.agulha[0], "L");
-        d::vu(&p, r_(290.0, 40.0, 214.0, 148.0), self.agulha[1], "R");
-        for (c, x) in [(0usize, 64.0), (1, 290.0)] {
+        // ===== VB-DAC1 BLUETOOTH DAC (entrada) =====
+        self.unidade(&p, r_(34.0, 16.0, 832.0, 160.0), s);
+        d::gravado(&p, p_(60.0, 22.0), Align2::LEFT_TOP, "V I T R O L A   B T", fonte(15.0), tinta);
+        d::gravado(&p, p_(250.0, 27.0), Align2::LEFT_TOP, "VB-DAC1  ·  BLUETOOTH DAC  ·  INPUT", fonte(7.5), tinta);
+        d::vidro(&p, r_(56.0, 46.0, 560.0, 122.0), s);
+        d::vu(&p, r_(64.0, 54.0, 140.0, 106.0), self.agulha[0], "IN L");
+        d::vu(&p, r_(210.0, 54.0, 140.0, 106.0), self.agulha[1], "IN R");
+        for (c, x) in [(0usize, 64.0), (1, 210.0)] {
             let aceso = self.pico_canal[c].is_some_and(|t| t.elapsed() < Duration::from_millis(350));
-            d::led(&p, p_(x + 196.0, 54.0), 3.6 * s, rgb(255, 40, 30), aceso);
-            p.text(p_(x + 188.0, 54.0), Align2::RIGHT_CENTER, "PEAK", fonte(7.0), Color32::from_rgb(60, 36, 14));
+            d::led(&p, p_(x + 126.0, 64.0), 2.6 * s, rgb(255, 40, 30), aceso);
         }
-        d::espectro(&p, r_(516.0, 40.0, 322.0, 148.0), &self.bandas, &self.picos);
 
-        // janela 2: fita + display de informações
-        d::vidro(&p, r_(50.0, 214.0, 800.0, 216.0), s);
-        let modo = v.fluxo.as_ref().map(|f| f.modo.nome().to_uppercase()).unwrap_or_default();
-        let titulo = v.aparelho.as_ref().map(|a| a.nome.clone()).unwrap_or_else(|| "SEM FITA".into());
-        let sub = match (&v.fluxo, &v.aparelho) {
-            (Some(f), _) => format!("sbc {} · {} kbps · {} kHz", f.modo.nome(), f.kbps, f.rate as f32 / 1000.0),
-            (None, Some(_)) => "conectada, coloque o disco".into(),
-            _ => "ligue o Bluetooth e escolha o PC na vitrola".into(),
-        };
-        let seg = Self::segundos(v);
-        d::fita(
+        // ===== VB-7000 STEREO RECEIVER =====
+        let y0 = 182.0; // receiver
+        self.unidade(&p, r_(34.0, y0, 832.0, 252.0), s);
+        d::gravado(
             &p,
-            r_(64.0, 226.0, 300.0, 192.0),
-            &d::Fita {
-                titulo: &titulo,
-                subtitulo: &sub,
-                angulo: self.angulo,
-                progresso: (seg % VOLTA_FITA_S) / VOLTA_FITA_S,
-                gravando: v.gravando.is_some(),
-            },
+            p_(60.0, y0 + 8.0),
+            Align2::LEFT_TOP,
+            "VB-7000  ·  STEREO RECEIVER  ·  OUTPUT",
+            fonte(7.5),
+            tinta,
         );
+        d::vidro(&p, r_(56.0, y0 + 32.0, 560.0, 158.0), s);
+        d::vu(&p, r_(64.0, y0 + 40.0, 270.0, 142.0), self.agulha_saida[0], "OUT L");
+        d::vu(&p, r_(338.0, y0 + 40.0, 270.0, 142.0), self.agulha_saida[1], "OUT R");
+        for (c, x) in [(0usize, 64.0), (1, 338.0)] {
+            let aceso = self.pico_saida[c].is_some_and(|t| t.elapsed() < Duration::from_millis(350));
+            d::led(&p, p_(x + 252.0, y0 + 52.0), 3.0 * s, rgb(255, 40, 30), aceso);
+            p.text(p_(x + 245.0, y0 + 52.0), Align2::RIGHT_CENTER, "PEAK", fonte(6.0), Color32::from_rgb(60, 36, 14));
+        }
         let ap = v.aparelho.as_ref();
         let pc = if !v.bt_disponivel {
-            "Bluetooth indisponível".to_string()
+            "sem Bluetooth".to_string()
         } else {
             format!(
-                "{}, {}",
+                "{}{}",
                 if v.disfarce { "caixa de som" } else { "computador" },
-                if v.visivel { format!("visível \"{}\"", v.alias) } else { "invisível".into() }
+                if v.visivel { format!(", visível \"{}\"", v.alias) } else { String::new() }
             )
         };
         let linhas = [
@@ -239,212 +239,61 @@ impl App {
             ("ENDEREÇO", ap.map(|a| a.mac.clone()).unwrap_or_else(|| "--".into())),
             ("CHIP", ap.map(|a| a.chip.clone().unwrap_or_else(|| "lendo...".into())).unwrap_or_else(|| "--".into())),
             ("BLUETOOTH", ap.and_then(|a| a.versao_bt.clone()).unwrap_or_else(|| "--".into())),
-            ("CODEC", if v.fluxo.is_some() { format!("SBC {modo}") } else { "--".into() }),
-            ("BITPOOL", v.fluxo.as_ref().map(|f| f.bitpool.to_string()).unwrap_or_else(|| "--".into())),
-            ("TAXA", v.fluxo.as_ref().map(|f| format!("{} kbps", f.kbps)).unwrap_or_else(|| "--".into())),
             (
-                "AMOSTRAGEM",
+                "CODEC",
                 v.fluxo
                     .as_ref()
-                    .map(|f| format!("{} kHz / 16 bit", f.rate as f32 / 1000.0))
+                    .map(|f| format!("SBC {}", f.modo.nome().to_uppercase()))
+                    .unwrap_or_else(|| "--".into()),
+            ),
+            (
+                "TAXA",
+                v.fluxo
+                    .as_ref()
+                    .map(|f| format!("{} kbps  bp{}  {}k", f.kbps, f.bitpool, f.rate / 1000))
                     .unwrap_or_else(|| "--".into()),
             ),
             ("ESTE PC", pc),
         ];
-        d::display(&p, r_(380.0, 226.0, 458.0, 192.0), &linhas);
-
-        // faixa 3: equalizador gráfico e funções de receiver (só a escuta;
-        // o REC grava o sinal original)
-        self.desenhar_eq(ui, &p, &p_, &r_, s);
-
-        // deck: marca, contador, teclas, alavanca e LEDs
-        let tinta = rgb(34, 34, 34);
-        d::gravado(&p, p_(64.0, 606.0), Align2::LEFT_TOP, "V I T R O L A   B T", fonte(23.0), tinta);
-        d::gravado(&p, p_(64.0, 638.0), Align2::LEFT_TOP, "STEREO CASSETTE DECK", fonte(8.5), tinta);
-        d::contador(&p, r_(64.0, 660.0, 150.0, 46.0), seg as u64);
-        d::gravado(&p, p_(139.0, 712.0), Align2::CENTER_TOP, "TAPE COUNTER", fonte(8.0), tinta);
-
-        let tem_audio = v.fluxo.is_some();
-        let parado = !(v.tocando || v.gravando.is_some());
-        let teclas = [
-            (Icone::Rec, "REC", 240.0, v.gravando.is_some(), tem_audio, "rec"),
-            (Icone::Play, "PLAY", 318.0, v.tocando, tem_audio, "play"),
-            (Icone::Stop, "STOP", 396.0, parado, true, "stop"),
-            (Icone::Eject, "FITAS", 474.0, false, true, "eject"),
-        ];
-        for (icone, rotulo, x, travada, habilitada, id) in teclas {
-            let r = r_(x, 630.0, 70.0, 76.0);
-            let resp = ui.interact(r, ui.id().with(id), if habilitada { Sense::click() } else { Sense::hover() });
-            let segurando = habilitada && resp.is_pointer_button_down_on();
-            d::tecla(&p, r, icone, rotulo, travada || segurando, habilitada);
-            let resp = if habilitada { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp };
-            if resp.clicked() {
-                match id {
-                    "rec" => self.enviar(Comando::Rec),
-                    "play" => self.enviar(Comando::Play),
-                    "stop" => self.enviar(Comando::Stop),
-                    _ => abrir_pasta(),
-                }
-            }
-        }
-        d::gravado(&p, p_(318.0, 712.0), Align2::LEFT_TOP, "TRAVA MECÂNICA: STOP SOLTA PLAY E REC", fonte(7.5), tinta);
-
-        // alavanca BLUETOOTH
-        if self
-            .alavanca_pendente
-            .is_some_and(|(alvo, t)| alvo == v.receptor_ligado || t.elapsed() > Duration::from_secs(8))
+        d::display(&p, r_(356.0, 54.0, 252.0, 106.0), &linhas);
+        let em_dual = v.fluxo.as_ref().is_some_and(|f| f.modo == sbc::Modo::Dual);
+        for (i, (rotulo, cor, aceso)) in [
+            ("BT LINK", rgb(64, 180, 255), v.aparelho.is_some()),
+            ("SBC LOCK", rgb(255, 180, 58), v.fluxo.is_some()),
+            ("DUAL 396", rgb(80, 230, 100), em_dual),
+        ]
+        .iter()
+        .enumerate()
         {
-            self.alavanca_pendente = None;
+            let y = 62.0 + i as f32 * 20.0;
+            d::led(&p, p_(640.0, y), 4.0 * s, *cor, *aceso);
+            d::gravado(&p, p_(652.0, y), Align2::LEFT_CENTER, rotulo, fonte(7.5), tinta);
         }
-        let ligado = self.alavanca_pendente.map(|(a, _)| a).unwrap_or(v.receptor_ligado);
-        d::gravado(&p, p_(640.0, 606.0), Align2::CENTER_TOP, "BLUETOOTH", fonte(9.0), tinta);
-        d::gravado(&p, p_(640.0, 622.0), Align2::CENTER_TOP, "ON", fonte(8.0), tinta);
-        d::gravado(&p, p_(640.0, 726.0), Align2::CENTER_BOTTOM, "OFF", fonte(8.0), tinta);
-        let r_alav = r_(600.0, 632.0, 80.0, 84.0);
-        d::alavanca(&p, r_alav, ligado);
+        d::gravado(&p, p_(640.0, 128.0), Align2::LEFT_TOP, "SBC DECODER · 48 kHz", fonte(7.0), tinta);
+        d::gravado(&p, p_(640.0, 142.0), Align2::LEFT_TOP, "JITTER BUFFER 250 ms", fonte(7.0), tinta);
+
+        // VOLUME e BALANCE
+        d::gravado(&p, p_(690.0, y0 + 34.0), Align2::CENTER_TOP, "VOLUME", fonte(8.0), tinta);
+        let c_vol = p_(690.0, y0 + 104.0);
+        let r_vol = Rect::from_center_size(c_vol, vec2(100.0 * s, 100.0 * s));
         let resp = ui
-            .interact(r_alav, ui.id().with("alavanca"), Sense::click())
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
-        if resp.clicked() && self.alavanca_pendente.is_none() {
-            let novo = !ligado;
-            self.alavanca_pendente = Some((novo, Instant::now()));
-            self.enviar(if novo { Comando::LigarBluetooth } else { Comando::DesligarBluetooth });
-        }
-
-        let leds = [
-            ("POWER", rgb(255, 180, 58), ligado),
-            ("LINK", rgb(64, 180, 255), v.aparelho.is_some()),
-            ("PLAY", rgb(80, 230, 100), v.tocando),
-            ("REC", rgb(255, 59, 47), v.gravando.is_some()),
-        ];
-        for (i, (rotulo, cor, aceso)) in leds.iter().enumerate() {
-            let y = 634.0 + i as f32 * 22.0;
-            d::led(&p, p_(722.0, y), 5.0 * s, *cor, *aceso);
-            d::gravado(&p, p_(736.0, y), Align2::LEFT_CENTER, rotulo, fonte(8.5), tinta);
-        }
-
-        // atalhos gravados no painel
-        for (x, rotulo, alvo) in [(784.0, "AJUSTES", 0), (784.0, "REGISTRO", 1)] {
-            let y = if alvo == 0 { 634.0 } else { 656.0 };
-            let r = r_(x, y - 8.0, 60.0, 16.0);
-            let resp =
-                ui.interact(r, ui.id().with(rotulo), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
-            let cor = if resp.hovered() { rgb(150, 30, 20) } else { tinta };
-            d::gravado(&p, pos2(r.left(), r.center().y), Align2::LEFT_CENTER, rotulo, fonte(8.5), cor);
-            if resp.clicked() {
-                if alvo == 0 {
-                    self.ver_ajustes = !self.ver_ajustes;
-                } else {
-                    self.ver_registro = !self.ver_registro;
-                }
-            }
-        }
-
-        // linha de status
-        let status = status(v);
-        d::gravado(&p, p_(64.0, 750.0), Align2::LEFT_TOP, &status, fonte(10.5), rgb(52, 52, 52));
-    }
-
-    fn aplicar_som(&mut self) {
-        {
-            let mut e = self.c.trava();
-            e.som = self.prefs.som.clone();
-            e.som_versao += 1;
-        }
-        self.som_sujo = true;
-    }
-
-    fn desenhar_eq(
-        &mut self,
-        ui: &mut egui::Ui,
-        p: &egui::Painter,
-        p_: &dyn Fn(f32, f32) -> egui::Pos2,
-        r_: &dyn Fn(f32, f32, f32, f32) -> Rect,
-        s: f32,
-    ) {
-        let tinta = rgb(34, 34, 34);
-        let fonte = |t: f32| FontId::proportional(t * s);
-        let painel = r_(50.0, 440.0, 800.0, 154.0);
-        d::grad_v(p, painel, &[(0.0, Color32::from_black_alpha(22)), (1.0, Color32::from_black_alpha(6))]);
-        p.rect_stroke(painel, Rounding::same(4.0 * s), egui::Stroke::new(1.0_f32, Color32::from_black_alpha(70)));
-        p.line_segment(
-            [painel.left_bottom(), painel.right_bottom()],
-            egui::Stroke::new(1.0_f32, Color32::from_white_alpha(170)),
-        );
-        d::gravado(p, p_(64.0, 446.0), Align2::LEFT_TOP, "GRAPHIC EQUALIZER", fonte(8.5), tinta);
-        d::gravado(p, p_(520.0, 446.0), Align2::LEFT_TOP, "FILTERS", fonte(8.5), tinta);
-        d::gravado(p, p_(806.0, 446.0), Align2::CENTER_TOP, "BALANCE", fonte(8.5), tinta);
+            .interact(r_vol, ui.id().with("volume"), Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::ResizeVertical);
         let mut mudou = false;
         let mut soltou = false;
-
-        // FLAT: zera o equalizador
-        let r_flat = r_(440.0, 444.0, 60.0, 14.0);
-        let resp = ui
-            .interact(r_flat, ui.id().with("eq-flat"), Sense::click())
-            .on_hover_cursor(egui::CursorIcon::PointingHand);
-        let cor = if resp.hovered() { rgb(150, 30, 20) } else { tinta };
-        d::gravado(p, pos2(r_flat.right(), r_flat.center().y), Align2::RIGHT_CENTER, "FLAT", fonte(8.5), cor);
-        if resp.clicked() {
-            self.prefs.som.ganhos = [0.0; 10];
+        if resp.double_clicked() {
+            self.prefs.som.volume = 1.0;
             mudou = true;
             soltou = true;
+        } else if resp.dragged() {
+            self.prefs.som.volume = (self.prefs.som.volume - resp.drag_delta().y / (160.0 * s)).clamp(0.0, 1.0);
+            mudou = true;
         }
-
-        let rotulos = ["31", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
-        for (i, rotulo) in rotulos.iter().enumerate() {
-            let r = r_(64.0 + i as f32 * 44.0, 462.0, 40.0, 126.0);
-            let resp = ui.interact(r, ui.id().with(("eq", i)), Sense::click_and_drag());
-            let resp = resp.on_hover_cursor(egui::CursorIcon::ResizeVertical);
-            if resp.double_clicked() {
-                self.prefs.som.ganhos[i] = 0.0;
-                mudou = true;
-                soltou = true;
-            } else if resp.dragged() || resp.clicked() {
-                if let Some(pt) = resp.interact_pointer_pos() {
-                    let k = r.height() / 120.0;
-                    let (topo, alt) = (r.top() + 54.0 * k - 46.0 * k, 92.0 * k);
-                    let mut g = ((topo + alt - pt.y) / alt * 24.0 - 12.0).clamp(-12.0, 12.0);
-                    if g.abs() < 0.6 {
-                        g = 0.0; // trava no centro
-                    }
-                    g = (g * 2.0).round() / 2.0;
-                    if g != self.prefs.som.ganhos[i] {
-                        self.prefs.som.ganhos[i] = g;
-                        mudou = true;
-                    }
-                }
-            }
-            soltou |= resp.drag_stopped() || resp.clicked();
-            d::cursor_eq(p, r, self.prefs.som.ganhos[i], rotulo);
-        }
-
-        let funcoes: [Funcao; 4] = [
-            ("RUMBLE", "Corta o ronco do motor e do prato (abaixo de ~35 Hz)", |s| &mut s.rumble),
-            ("SCRATCH", "Atenua chiado e estalos do disco (acima de ~8 kHz)", |s| &mut s.scratch),
-            ("MONO", "Soma os canais: discos mono antigos ficam com menos ruído", |s| &mut s.mono),
-            ("LOUDNESS", "Reforça graves e agudos para ouvir baixo", |s| &mut s.loudness),
-        ];
-        for (j, (rotulo, dica, campo)) in funcoes.iter().enumerate() {
-            let r = r_(522.0 + j as f32 * 60.0, 474.0, 52.0, 62.0);
-            let resp = ui
-                .interact(r, ui.id().with(("func", j)), Sense::click())
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .on_hover_text(*dica);
-            if resp.clicked() {
-                let v = campo(&mut self.prefs.som);
-                *v = !*v;
-                mudou = true;
-                soltou = true;
-            }
-            let ligado = *campo(&mut self.prefs.som);
-            d::botao_funcao(p, r, rotulo, ligado);
-        }
-        d::gravado(p, p_(522.0, 552.0), Align2::LEFT_TOP, "SÓ NA ESCUTA: O REC GRAVA O ORIGINAL", fonte(7.0), tinta);
-
-        // BALANCE: arraste para cima/baixo, duplo clique centraliza
-        let c = p_(806.0, 512.0);
-        let raio = 22.0 * s;
-        let r_bal = Rect::from_center_size(c, egui::vec2(raio * 2.6, raio * 2.6));
+        soltou |= resp.drag_stopped();
+        d::botao_giratorio(&p, c_vol, 38.0 * s, self.prefs.som.volume * 2.0 - 1.0, "MIN", "MAX");
+        d::gravado(&p, p_(808.0, y0 + 54.0), Align2::CENTER_TOP, "BALANCE", fonte(8.0), tinta);
+        let c_bal = p_(808.0, y0 + 104.0);
+        let r_bal = Rect::from_center_size(c_bal, vec2(64.0 * s, 64.0 * s));
         let resp = ui
             .interact(r_bal, ui.id().with("balance"), Sense::click_and_drag())
             .on_hover_cursor(egui::CursorIcon::ResizeVertical);
@@ -458,7 +307,197 @@ impl App {
             mudou = true;
         }
         soltou |= resp.drag_stopped();
-        d::botao_giratorio(p, c, raio, self.prefs.som.balanco, "L", "R");
+        d::botao_giratorio(&p, c_bal, 24.0 * s, self.prefs.som.balanco, "L", "R");
+
+        // linha de baixo: alavanca BLUETOOTH, LEDs, funções e HI-FI
+        if self
+            .alavanca_pendente
+            .is_some_and(|(alvo, t)| alvo == v.receptor_ligado || t.elapsed() > Duration::from_secs(8))
+        {
+            self.alavanca_pendente = None;
+        }
+        let ligado = self.alavanca_pendente.map(|(a, _)| a).unwrap_or(v.receptor_ligado);
+        let r_alav = r_(62.0, y0 + 196.0, 40.0, 52.0);
+        d::alavanca(&p, r_alav, ligado);
+        d::gravado(&p, p_(106.0, y0 + 198.0), Align2::LEFT_TOP, "BT ON", fonte(7.0), tinta);
+        d::gravado(&p, p_(106.0, y0 + 246.0), Align2::LEFT_BOTTOM, "OFF", fonte(7.0), tinta);
+        let resp = ui
+            .interact(r_alav, ui.id().with("alavanca"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if resp.clicked() && self.alavanca_pendente.is_none() {
+            let novo = !ligado;
+            self.alavanca_pendente = Some((novo, Instant::now()));
+            self.enviar(if novo { Comando::LigarBluetooth } else { Comando::DesligarBluetooth });
+        }
+        let leds = [
+            ("POWER", rgb(255, 180, 58), ligado),
+            ("LINK", rgb(64, 180, 255), v.aparelho.is_some()),
+            ("STEREO", rgb(255, 180, 58), v.fluxo.is_some()),
+        ];
+        for (i, (rotulo, cor, aceso)) in leds.iter().enumerate() {
+            let y = y0 + 206.0 + i as f32 * 17.0;
+            d::led(&p, p_(150.0, y), 4.0 * s, *cor, *aceso);
+            d::gravado(&p, p_(160.0, y), Align2::LEFT_CENTER, rotulo, fonte(7.0), tinta);
+        }
+        let funcoes: [Funcao; 4] = [
+            ("RUMBLE", "Corta o ronco do motor e do prato (abaixo de ~35 Hz)", |s| &mut s.rumble),
+            ("SCRATCH", "Atenua chiado e estalos do disco (acima de ~8 kHz)", |s| &mut s.scratch),
+            ("MONO", "Soma os canais: discos mono antigos ficam com menos ruído", |s| &mut s.mono),
+            ("LOUDNESS", "Reforça graves e agudos para ouvir baixo", |s| &mut s.loudness),
+        ];
+        for (j, (rotulo, dica, campo)) in funcoes.iter().enumerate() {
+            let r = r_(250.0 + j as f32 * 62.0, y0 + 196.0, 54.0, 52.0);
+            let resp = ui
+                .interact(r, ui.id().with(("func", j)), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(*dica);
+            if resp.clicked() {
+                let v = campo(&mut self.prefs.som);
+                *v = !*v;
+                mudou = true;
+                soltou = true;
+            }
+            let ligado = *campo(&mut self.prefs.som);
+            d::botao_funcao(&p, r, rotulo, ligado);
+        }
+        let r_hifi = r_(510.0, y0 + 196.0, 64.0, 52.0);
+        let resp = ui
+            .interact(r_hifi, ui.id().with("hifi"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text("Renegocia o SBC dual channel (~396 kbps). A lâmpada acende quando ele está ativo.");
+        if resp.clicked() {
+            self.enviar(Comando::HiFi);
+        }
+        d::botao_funcao(&p, r_hifi, "HI-FI", em_dual || resp.is_pointer_button_down_on());
+        for (y, rotulo, alvo) in [(y0 + 206.0, "AJUSTES", 0), (y0 + 228.0, "REGISTRO", 1)] {
+            let r = r_(770.0, y - 8.0, 80.0, 16.0);
+            let resp =
+                ui.interact(r, ui.id().with(rotulo), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+            let cor = if resp.hovered() { rgb(150, 30, 20) } else { tinta };
+            d::gravado(&p, pos2(r.left(), r.center().y), Align2::LEFT_CENTER, rotulo, fonte(8.0), cor);
+            if resp.clicked() {
+                if alvo == 0 {
+                    self.ver_ajustes = !self.ver_ajustes;
+                } else {
+                    self.ver_registro = !self.ver_registro;
+                }
+            }
+        }
+
+        // ===== VB-EQ10 GRAPHIC EQUALIZER / SPECTRUM ANALYZER =====
+        self.unidade(&p, r_(34.0, 440.0, 832.0, 172.0), s);
+        d::gravado(
+            &p,
+            p_(60.0, 446.0),
+            Align2::LEFT_TOP,
+            "VB-EQ10  ·  GRAPHIC EQUALIZER  ·  OUTPUT SPECTRUM",
+            fonte(7.5),
+            tinta,
+        );
+        d::vidro(&p, r_(56.0, 462.0, 300.0, 140.0), s);
+        d::espectro(&p, r_(62.0, 468.0, 288.0, 128.0), &self.bandas, &self.picos);
+        let rotulos = ["31", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
+        for (i, rotulo) in rotulos.iter().enumerate() {
+            let r = r_(374.0 + i as f32 * 43.0, 460.0, 40.0, 142.0);
+            let resp = ui
+                .interact(r, ui.id().with(("eq", i)), Sense::click_and_drag())
+                .on_hover_cursor(egui::CursorIcon::ResizeVertical);
+            if resp.double_clicked() {
+                self.prefs.som.ganhos[i] = 0.0;
+                mudou = true;
+                soltou = true;
+            } else if resp.dragged() || resp.clicked() {
+                if let Some(pt) = resp.interact_pointer_pos() {
+                    let k = r.height() / 120.0;
+                    let (topo, alt) = (r.top() + 8.0 * k, 92.0 * k);
+                    let mut g = ((topo + alt - pt.y) / alt * 24.0 - 12.0).clamp(-12.0, 12.0);
+                    if g.abs() < 0.6 {
+                        g = 0.0; // trava no centro
+                    }
+                    g = (g * 2.0).round() / 2.0;
+                    if g != self.prefs.som.ganhos[i] {
+                        self.prefs.som.ganhos[i] = g;
+                        mudou = true;
+                    }
+                }
+            }
+            soltou |= resp.drag_stopped() || resp.clicked();
+            d::cursor_eq(&p, r, self.prefs.som.ganhos[i], rotulo);
+        }
+        let r_flat = r_(814.0, 496.0, 40.0, 52.0);
+        let resp = ui
+            .interact(r_flat, ui.id().with("eq-flat"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
+            .on_hover_text("Zera o equalizador");
+        if resp.clicked() {
+            self.prefs.som.ganhos = [0.0; 10];
+            mudou = true;
+            soltou = true;
+        }
+        let eq_ativo = self.prefs.som.ganhos.iter().any(|g| g.abs() > 0.01);
+        d::botao_funcao(&p, r_flat, "FLAT", !eq_ativo || resp.is_pointer_button_down_on());
+
+        // ===== VB-C70 STEREO CASSETTE DECK =====
+        self.unidade(&p, r_(34.0, 618.0, 832.0, 238.0), s);
+        d::gravado(&p, p_(60.0, 624.0), Align2::LEFT_TOP, "VB-C70  ·  STEREO CASSETTE DECK", fonte(7.5), tinta);
+        d::gravado(&p, p_(850.0, 624.0), Align2::RIGHT_TOP, "DIRECT FLAC RECORDING", fonte(7.5), tinta);
+        d::vidro(&p, r_(56.0, 640.0, 320.0, 208.0), s);
+        let titulo = v.aparelho.as_ref().map(|a| a.nome.clone()).unwrap_or_else(|| "SEM FITA".into());
+        let sub = match (&v.fluxo, &v.aparelho) {
+            (Some(f), _) => format!("sbc {} · {} kbps · {} kHz", f.modo.nome(), f.kbps, f.rate as f32 / 1000.0),
+            (None, Some(_)) => "conectada, coloque o disco".into(),
+            _ => "ligue o Bluetooth e escolha o PC na vitrola".into(),
+        };
+        let seg = Self::segundos(v);
+        d::fita(
+            &p,
+            r_(64.0, 648.0, 304.0, 192.0),
+            &d::Fita {
+                titulo: &titulo,
+                subtitulo: &sub,
+                angulo: self.angulo,
+                progresso: (seg % VOLTA_FITA_S) / VOLTA_FITA_S,
+                gravando: v.gravando.is_some(),
+            },
+        );
+        d::contador(&p, r_(400.0, 648.0, 150.0, 46.0), seg as u64);
+        d::gravado(&p, p_(475.0, 700.0), Align2::CENTER_TOP, "TAPE COUNTER", fonte(7.5), tinta);
+        for (i, (rotulo, cor, aceso)) in
+            [("PLAY", rgb(80, 230, 100), v.tocando), ("REC", rgb(255, 59, 47), v.gravando.is_some())].iter().enumerate()
+        {
+            let y = 660.0 + i as f32 * 22.0;
+            d::led(&p, p_(578.0, y), 4.5 * s, *cor, *aceso);
+            d::gravado(&p, p_(590.0, y), Align2::LEFT_CENTER, rotulo, fonte(8.0), tinta);
+        }
+        let tem_audio = v.fluxo.is_some();
+        let parado = !(v.tocando || v.gravando.is_some());
+        let teclas = [
+            (Icone::Rec, "REC", 400.0, v.gravando.is_some(), tem_audio, "rec"),
+            (Icone::Play, "PLAY", 478.0, v.tocando, tem_audio, "play"),
+            (Icone::Stop, "STOP", 556.0, parado, true, "stop"),
+            (Icone::Eject, "FITAS", 634.0, false, true, "eject"),
+        ];
+        for (icone, rotulo, x, travada, habilitada, id) in teclas {
+            let r = r_(x, 732.0, 70.0, 76.0);
+            let resp = ui.interact(r, ui.id().with(id), if habilitada { Sense::click() } else { Sense::hover() });
+            let segurando = habilitada && resp.is_pointer_button_down_on();
+            d::tecla(&p, r, icone, rotulo, travada || segurando, habilitada);
+            let resp = if habilitada { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp };
+            if resp.clicked() {
+                match id {
+                    "rec" => self.enviar(Comando::Rec),
+                    "play" => self.enviar(Comando::Play),
+                    "stop" => self.enviar(Comando::Stop),
+                    _ => abrir_pasta(),
+                }
+            }
+        }
+        d::gravado(&p, p_(400.0, 818.0), Align2::LEFT_TOP, "TRAVA MECÂNICA: STOP SOLTA PLAY E REC", fonte(7.0), tinta);
+        d::gravado(&p, p_(850.0, 836.0), Align2::RIGHT_TOP, "48 kHz · 16 BIT · LOSSLESS", fonte(7.0), tinta);
+
+        // etiqueta de status abaixo do rack
+        let status = status(v);
+        p.text(p_(36.0, ALT - 22.0), Align2::LEFT_TOP, &status, fonte(10.0), rgb(196, 186, 168));
 
         if mudou {
             self.aplicar_som();
@@ -467,6 +506,36 @@ impl App {
             self.prefs.salvar();
             self.som_sujo = false;
         }
+    }
+
+    /// Frente de um aparelho do rack: alumínio escovado, bisel e parafusos de rack.
+    fn unidade(&self, p: &egui::Painter, r: Rect, s: f32) {
+        p.rect_filled(r.translate(vec2(0.0, 3.0 * s)), Rounding::same(3.0 * s), Color32::from_black_alpha(140));
+        p.image(self.aluminio.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        d::grad_v(
+            p,
+            r,
+            &[(0.0, Color32::from_white_alpha(48)), (0.45, Color32::TRANSPARENT), (1.0, Color32::from_black_alpha(40))],
+        );
+        p.line_segment([r.left_top(), r.right_top()], egui::Stroke::new(1.5_f32, Color32::from_white_alpha(220)));
+        p.line_segment([r.left_bottom(), r.right_bottom()], egui::Stroke::new(2.0_f32, Color32::from_black_alpha(110)));
+        for (dx, dy) in [
+            (10.0, 10.0),
+            (r.width() / s - 10.0, 10.0),
+            (10.0, r.height() / s - 10.0),
+            (r.width() / s - 10.0, r.height() / s - 10.0),
+        ] {
+            d::parafuso(p, r.min + vec2(dx * s, dy * s), 3.6 * s);
+        }
+    }
+
+    fn aplicar_som(&mut self) {
+        {
+            let mut e = self.c.trava();
+            e.som = self.prefs.som.clone();
+            e.som_versao += 1;
+        }
+        self.som_sujo = true;
     }
 
     fn janelas(&mut self, ctx: &egui::Context) {
@@ -600,7 +669,10 @@ impl eframe::App for App {
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| self.desenhar(ui, &v));
         self.janelas(ctx);
         self.capturar(ctx);
-        let animando = v.tocando || v.gravando.is_some() || v.medindo || self.agulha.iter().any(|a| *a > -39.0);
+        let animando = v.tocando
+            || v.gravando.is_some()
+            || v.medindo
+            || self.agulha.iter().chain(&self.agulha_saida).any(|a| *a > -39.0);
         ctx.request_repaint_after(if animando { Duration::from_millis(16) } else { Duration::from_millis(250) });
     }
 

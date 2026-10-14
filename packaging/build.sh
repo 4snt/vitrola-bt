@@ -17,7 +17,15 @@ if [[ "$desc" =~ ^(v?[0-9]+\.[0-9]+\.[0-9]+)(-[0-9A-Za-z.]+)?-([0-9]+)-g([0-9a-f
   desc="${BASH_REMATCH[1]}-${pre:+$pre.}dev.${BASH_REMATCH[3]}+g${BASH_REMATCH[4]}"
 fi
 [[ "$desc" =~ ^v?[0-9] ]] || desc="v0.0.0-dev+g$desc"
-export VERSION="${desc#v}"
+desc="${desc#v}"
+# Versão e pré-versão separadas para o nFPM formatar cada pacote do jeito certo
+# (deb/rpm: 0.3.0~rc1, que vem ANTES de 0.3.0; arch: 0.3.0rc1)
+export VERSION="${desc%%-*}"
+if [[ "$desc" == *-* ]]; then
+  export PRERELEASE="${desc#*-}"
+else
+  export PRERELEASE=""
+fi
 export ARCH="${ARCH:-amd64}"
 
 if [[ ! -x target/release/vitrola-bt || -n "${COMPILAR:-}" ]]; then
@@ -28,7 +36,7 @@ nfpm() {
   if type -P nfpm >/dev/null; then
     command nfpm "$@"
   else
-    docker run --rm --user "$(id -u):$(id -g)" -e VERSION -e ARCH -v "$ROOT:/src" -w /src \
+    docker run --rm --user "$(id -u):$(id -g)" -e VERSION -e PRERELEASE -e ARCH -v "$ROOT:/src" -w /src \
       "goreleaser/nfpm:$NFPM_VERSION" "$@"
   fi
 }
@@ -39,7 +47,7 @@ for packager in deb rpm archlinux; do
 done
 
 # Tarball para outras distros: binário + dados + instalador
-pasta="vitrola-bt-$VERSION-linux-x86_64"
+pasta="vitrola-bt-$desc-linux-x86_64"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/$pasta"

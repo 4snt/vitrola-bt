@@ -6,9 +6,10 @@
 
 Ouça e grave no Linux o áudio Bluetooth de uma **vitrola**. O PC se passa por
 **caixa de som Bluetooth**, a vitrola pareia nele, o disco toca nos alto-falantes
-do PC — ou vira um FLAC — e tudo aparece num **tape deck dos anos 70**.
+do PC — ou vira um FLAC — e tudo aparece num **sistema hi-fi empilhado** dos anos 70/80:
+DAC Bluetooth, receiver, equalizador gráfico e tape deck num gabinete de nogueira.
 
-![O deck do Vitrola BT](docs/deck.png)
+![O rack do Vitrola BT](docs/deck.png)
 
 Testado com a Polyvox XTD-67 (chip JieLi, aparece como `LP3005_NP5`) em
 Pop!_OS 24.04 / COSMIC · PipeWire 1.6 · WirePlumber 0.5 · BlueZ 5.72.
@@ -18,9 +19,15 @@ Pop!_OS 24.04 / COSMIC · PipeWire 1.6 · WirePlumber 0.5 · BlueZ 5.72.
 - **Receptor Bluetooth próprio, no máximo que o chip aceita.** Sozinha, a vitrola
   escolhe SBC *joint stereo* a ~219 kbps. O app força **SBC dual channel a ~396 kbps**
   (o mesmo bitpool, só que por canal), dentro do que o próprio chip anuncia.
-- **Deck de verdade:** VU meters analógicos com lâmpada PEAK, analisador de espectro
-  em LEDs, fita cassete com carretéis girando, contador e display com aparelho, chip,
-  versão do Bluetooth, codec, bitpool e taxa.
+- **O rack:**
+  - **VB-DAC1 (Bluetooth DAC):** VU de **entrada** (o que chega da vitrola) e display com
+    aparelho, endereço, chip, versão do Bluetooth, codec, bitpool e taxa.
+  - **VB-7000 (receiver):** VU de **saída** (depois do EQ, filtros e volume) com lâmpada
+    PEAK, **VOLUME**, **BALANCE**, alavanca BLUETOOTH, funções e o botão **HI-FI**.
+  - **VB-EQ10 (equalizador):** analisador de espectro da **saída** e os 10 cursores.
+  - **VB-C70 (tape deck):** fita com carretéis girando, contador e teclas de piano.
+- **HI-FI:** renegocia o SBC dual channel (~396 kbps) na hora; a lâmpada acende quando
+  ele está ativo. Sem apertar nada, o app tenta o dual a cada minuto com o link estável.
 - **Equalizador gráfico de 10 bandas** (31 Hz a 16 kHz, ±12 dB) e as funções de um
   receiver de vinil: **RUMBLE** (corta o ronco do motor abaixo de ~35 Hz), **SCRATCH**
   (atenua chiado e estalos acima de ~8 kHz), **MONO** (discos mono antigos com menos
@@ -68,8 +75,8 @@ Abra **Vitrola BT** no menu de aplicativos:
 3. O som sai nos alto-falantes. **REC** grava; **AJUSTES** e **REGISTRO** ficam no painel.
 
 No equalizador, arraste os cursores (duplo clique zera, **FLAT** zera todos); no
-**BALANCE**, arraste para cima ou para baixo (duplo clique centraliza). Os ajustes
-ficam salvos.
+**VOLUME** e no **BALANCE**, arraste para cima ou para baixo (duplo clique volta ao
+padrão). Os ajustes ficam salvos. Se o display mostrar joint stereo, aperte **HI-FI**.
 
 No terminal, o mesmo motor sem janela:
 

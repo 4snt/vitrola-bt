@@ -180,6 +180,12 @@ impl Backend {
                 Some(r) => r.alternar_gravacao(),
                 None => self.c.log("REC: ligue o BLUETOOTH primeiro"),
             },
+            Comando::HiFi => match self.receptor.clone() {
+                Some(r) => {
+                    tokio::spawn(async move { r.hifi().await });
+                }
+                None => self.c.log("HI-FI: ligue o BLUETOOTH primeiro"),
+            },
             Comando::TocarAuto(auto) => {
                 self.tocar_auto = auto;
                 if let Some(r) = &self.receptor {
@@ -251,6 +257,7 @@ impl Backend {
             e.receptor_ligado = self.desejado;
             if aparelho.is_none() && e.fluxo.is_none() {
                 e.medidas = Default::default();
+                e.medidas_saida = Default::default();
             }
             e.aparelho = aparelho;
         }

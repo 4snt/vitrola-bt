@@ -98,6 +98,7 @@ fn laco(
     let mut pacote = vec![0u8; mtu.max(1024)];
     let mut pcm = Vec::with_capacity(16 * 1024);
     let mut medidor = Medidor::novo(cfg.rate);
+    let mut medidor_saida = Medidor::novo(cfg.rate);
     let (som, mut versao_som) = {
         let e = c.trava();
         (e.som.clone(), e.som_versao)
@@ -185,11 +186,14 @@ fn laco(
                 dsp.definir(&e.som);
             }
         }
+        // o EQ só afeta o que se ouve; o REC grava o sinal original
+        escuta.clear();
+        escuta.extend_from_slice(&pcm);
+        dsp.processar(&mut escuta);
+        if let Some(m) = medidor_saida.alimentar(&escuta) {
+            c.trava().medidas_saida = m;
+        }
         if let Some(s) = saida.as_mut() {
-            // o EQ só afeta o que se ouve; o REC grava o sinal original
-            escuta.clear();
-            escuta.extend_from_slice(&pcm);
-            dsp.processar(&mut escuta);
             if s.escrever(&escuta).is_err() {
                 c.log("A saída de som fechou (pw-cat)");
                 saida = None;

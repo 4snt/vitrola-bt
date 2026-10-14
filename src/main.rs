@@ -165,8 +165,8 @@ fn main() {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Vitrola BT")
         .with_app_id(APP_ID)
-        .with_inner_size([900.0, 780.0])
-        .with_min_inner_size([640.0, 555.0]);
+        .with_inner_size([820.0, 826.0])
+        .with_min_inner_size([560.0, 564.0]);
     if let Some(i) = icone() {
         viewport = viewport.with_icon(i);
     }

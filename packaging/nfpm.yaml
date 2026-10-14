@@ -4,6 +4,8 @@ name: vitrola-bt
 arch: ${ARCH}
 platform: linux
 version: ${VERSION}
+version_schema: none
+prerelease: ${PRERELEASE}
 maintainer: Murilo Santiago <murilo.escobedo@protonmail.com>
 description: |
   Ouça e grave sua vitrola Bluetooth no Linux.

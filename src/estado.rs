@@ -35,7 +35,9 @@ pub struct Estado {
     pub tocando: bool,
     pub gravando: Option<(PathBuf, Instant)>,
     pub inicio_play: Option<Instant>,
+    /// Entrada (o que chega da vitrola) e saída (depois do EQ, filtros e volume).
     pub medidas: Medidas,
+    pub medidas_saida: Medidas,
     pub ultima_medida: Option<Instant>,
     pub log: VecDeque<String>,
     /// Mensagem fixa (ex.: sistema sem suporte ao receptor).
@@ -99,6 +101,8 @@ pub enum Comando {
     Play,
     Stop,
     Rec,
+    /// Botão HI-FI: renegociar dual channel agora.
+    HiFi,
     /// Preferência "tocar ao conectar" mudou.
     TocarAuto(bool),
     /// Encerra tudo (grava o FLAC, solta a vitrola) e avisa pelo canal.

@@ -28,7 +28,9 @@ const JANELA: Duration = Duration::from_secs(120);
 /// Tempo tocando sem travar antes de tentar o upgrade para dual channel.
 const ESTAVEL: Duration = Duration::from_secs(20);
 /// Depois que o dual trava, fica em joint stereo por este tempo.
-const BLOQUEIO_DUAL: Duration = Duration::from_secs(10 * 60);
+const BLOQUEIO_DUAL: Duration = Duration::from_secs(2 * 60);
+/// Em joint stereo, de quanto em quanto tempo tenta de novo o dual channel.
+const INTERVALO_UPGRADE: Duration = Duration::from_secs(60);
 
 struct Fluxo {
     cfg: sbc::Config,
@@ -377,20 +379,51 @@ impl Receptor {
     }
 
     /// Upgrade para dual channel só depois de ESTAVEL sem travar no modo atual.
+    /// Sempre busca a melhor qualidade: enquanto este fluxo em joint stereo existir,
+    /// tenta o dual channel com o link estável (a primeira vez após ESTAVEL, depois
+    /// a cada INTERVALO_UPGRADE). Um fluxo novo (o dual) encerra este laço.
     async fn upgrade_quando_estavel(self: Arc<Self>, transporte: String, dispositivo: String) {
-        tokio::time::sleep(ESTAVEL).await;
-        let tocando_aqui = self.fluxos.lock().unwrap().get(&transporte).is_some_and(|f| f.trabalhador.is_some());
-        let travou = self
-            .travadas
-            .lock()
-            .unwrap()
-            .get(&dispositivo)
-            .is_some_and(|v| v.last().is_some_and(|t| t.elapsed() < ESTAVEL));
-        if !tocando_aqui || travou || !self.dual_permitido() || !self.pode_tentar(&dispositivo) {
-            return;
+        let mut espera = ESTAVEL;
+        loop {
+            tokio::time::sleep(espera).await;
+            espera = INTERVALO_UPGRADE;
+            let Some(tocando_aqui) = self.fluxos.lock().unwrap().get(&transporte).map(|f| f.trabalhador.is_some())
+            else {
+                return; // fluxo substituído (upgrade feito ou reconexão)
+            };
+            let travou = self
+                .travadas
+                .lock()
+                .unwrap()
+                .get(&dispositivo)
+                .is_some_and(|v| v.last().is_some_and(|t| t.elapsed() < ESTAVEL));
+            if !tocando_aqui || travou || !self.dual_permitido() || !self.pode_tentar(&dispositivo) {
+                continue;
+            }
+            self.c.log("Link estável: tentando o upgrade para dual channel");
+            self.forcar_dual(&dispositivo).await;
         }
-        self.c.log(format!("Link estável há {} s: tentando o upgrade para dual channel", ESTAVEL.as_secs()));
-        self.forcar_dual(&dispositivo).await;
+    }
+
+    /// Botão HI-FI: renegocia o dual channel agora, ignorando bloqueio e limites.
+    pub async fn hifi(self: &Arc<Self>) {
+        *self.dual_bloqueado_ate.lock().unwrap() = None;
+        let Ok(objs) = bluez::objetos(&self.conn).await else { return };
+        let Some(d) = bluez::fontes_conectadas(&objs).into_iter().next() else {
+            return self.c.log("HI-FI: nenhuma vitrola conectada");
+        };
+        let em_dual = self.fluxos.lock().unwrap().values().any(|f| f.cfg.modo == Modo::Dual && f.trabalhador.is_some());
+        if em_dual {
+            return self.c.log("HI-FI: já em dual channel (~396 kbps)");
+        }
+        self.tentativas.lock().unwrap().remove(&d.caminho);
+        self.travadas.lock().unwrap().remove(&d.caminho);
+        self.c.log("HI-FI: renegociando dual channel");
+        if self.tem_fluxo_de(&d.caminho) {
+            self.forcar_dual(&d.caminho).await;
+        } else {
+            self.conectar_audio(&d.caminho).await;
+        }
     }
 
     async fn parar_trabalhador(&self, transporte: &str) {

@@ -25,11 +25,21 @@ pub struct Som {
     pub loudness: bool,
     /// -1 (só esquerda) .. 0 (centro) .. +1 (só direita).
     pub balanco: f32,
+    /// Volume de escuta, 0..1 (curva de áudio aplicada no processamento).
+    pub volume: f32,
 }
 
 impl Default for Som {
     fn default() -> Self {
-        Som { ganhos: [0.0; 10], rumble: false, scratch: false, mono: false, loudness: false, balanco: 0.0 }
+        Som {
+            ganhos: [0.0; 10],
+            rumble: false,
+            scratch: false,
+            mono: false,
+            loudness: false,
+            balanco: 0.0,
+            volume: 1.0,
+        }
     }
 }
 
@@ -41,6 +51,7 @@ impl Som {
             && !self.mono
             && !self.loudness
             && self.balanco.abs() < 0.01
+            && self.volume >= 0.999
     }
 }
 
@@ -180,8 +191,11 @@ impl Processador {
         // Folga para não saturar com reforço: tira o maior ganho positivo
         let reforco = som.ganhos.iter().fold(0f32, |m, g| m.max(*g)) + if som.loudness { 6.0 } else { 0.0 };
         let folga = 10f32.powf(-reforco.max(0.0) / 20.0 * 0.7);
-        self.ganho_l *= folga;
-        self.ganho_r *= folga;
+        // volume com curva de potenciômetro logarítmico (~60 dB de excursão)
+        let v = som.volume.clamp(0.0, 1.0);
+        let volume = if v <= 0.0 { 0.0 } else { 10f32.powf((v - 1.0) * 3.0) };
+        self.ganho_l *= folga * volume;
+        self.ganho_r *= folga * volume;
         self.ativo = !som.neutro();
         self.som = som.clone();
     }
