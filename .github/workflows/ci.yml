@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Dependências
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends shellcheck desktop-file-utils python3-gi python3-dbus gir1.2-gtk-3.0
+          pipx install ruff
+      - name: shellcheck
+        run: shellcheck bin/vitrola packaging/build-deb.sh
+      - name: ruff
+        run: ruff check vitrola_bt bin/vitrola-gui
+      - name: Importa os módulos
+        run: python3 -c "import vitrola_bt.agente, vitrola_bt.gui"
+      - name: Valida o .desktop
+        run: desktop-file-validate data/*.desktop
+      - name: Ajuda do CLI
+        run: bin/vitrola --help
+
+  deb:
+    needs: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Gera o .deb
+        id: build
+        run: echo "deb=$(packaging/build-deb.sh)" >> "$GITHUB_OUTPUT"
+      - name: Confere o pacote
+        run: |
+          dpkg-deb --info "${{ steps.build.outputs.deb }}"
+          dpkg-deb --contents "${{ steps.build.outputs.deb }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vitrola-bt-deb
+          path: dist/*.deb
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: deb
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vitrola-bt-deb
+          path: dist
+      - name: Publica a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" dist/*.deb --repo "${{ github.repository }}" --title "${{ github.ref_name }}" --generate-notes

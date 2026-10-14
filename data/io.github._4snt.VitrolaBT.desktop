@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Vitrola BT
+GenericName=Receptor Bluetooth para vitrola
+Comment=Ouça e grave a vitrola Bluetooth no PC
+Exec=vitrola-gui
+Icon=vitrola-bt
+Terminal=false
+Categories=AudioVideo;Audio;Player;Recorder;
+Keywords=vitrola;turntable;bluetooth;a2dp;disco;vinil;
+StartupNotify=true

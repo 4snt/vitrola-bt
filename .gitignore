@@ -1,2 +1,4 @@
 gravacoes/*
 !gravacoes/.gitkeep
+dist/
+__pycache__/
