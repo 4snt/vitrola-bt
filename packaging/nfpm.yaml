@@ -1,0 +1,109 @@
+# nFPM: um pacote por família de distro a partir do mesmo conteúdo.
+# Gerado por packaging/build.sh (VERSION vem do ambiente).
+name: vitrola-bt
+arch: all
+platform: linux
+version: ${VERSION}
+version_schema: none
+maintainer: Murilo Santiago <murilo.escobedo@protonmail.com>
+description: |
+  Recebe o áudio Bluetooth de uma vitrola no Linux.
+  O PC se passa por caixa de som Bluetooth (A2DP Sink), a vitrola pareia nele,
+  o disco toca nos alto-falantes e pode ser gravado em FLAC.
+  App gráfico (GTK) e comando de terminal "vitrola".
+vendor: vitrola-bt
+homepage: https://github.com/4snt/vitrola-bt
+license: MIT
+section: sound
+
+contents:
+  - src: bin/vitrola
+    dst: /usr/share/vitrola-bt/bin/vitrola
+    file_info: {mode: 0755}
+  - src: bin/vitrola-gui
+    dst: /usr/share/vitrola-bt/bin/vitrola-gui
+    file_info: {mode: 0755}
+  - src: vitrola_bt/__init__.py
+    dst: /usr/share/vitrola-bt/vitrola_bt/__init__.py
+  - src: vitrola_bt/agente.py
+    dst: /usr/share/vitrola-bt/vitrola_bt/agente.py
+  - src: vitrola_bt/gui.py
+    dst: /usr/share/vitrola-bt/vitrola_bt/gui.py
+  - src: vitrola_bt/bandeja.py
+    dst: /usr/share/vitrola-bt/vitrola_bt/bandeja.py
+  - src: /usr/share/vitrola-bt/bin/vitrola
+    dst: /usr/bin/vitrola
+    type: symlink
+  - src: /usr/share/vitrola-bt/bin/vitrola-gui
+    dst: /usr/bin/vitrola-gui
+    type: symlink
+  - src: data/io.github._4snt.VitrolaBT.desktop
+    dst: /usr/share/applications/io.github._4snt.VitrolaBT.desktop
+  - src: data/vitrola-bt.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/vitrola-bt.svg
+  # Configs de áudio para todos os usuários (drop-ins lidos pelo PipeWire/WirePlumber)
+  - src: config/wireplumber/51-vitrola-bt.conf
+    dst: /usr/share/wireplumber/wireplumber.conf.d/51-vitrola-bt.conf
+  - src: config/pipewire/51-vitrola-rates.conf
+    dst: /usr/share/pipewire/pipewire.conf.d/51-vitrola-rates.conf
+  - src: README.md
+    dst: /usr/share/doc/vitrola-bt/README.md
+  - src: LICENSE
+    dst: /usr/share/licenses/vitrola-bt/LICENSE
+
+scripts:
+  postinstall: packaging/postinstall.sh
+
+# Nomes de pacote mudam de distro para distro
+overrides:
+  deb:
+    depends:
+      - bluez
+      - pipewire
+      - pipewire-bin
+      - wireplumber
+      - python3
+      - python3-gi
+      - python3-dbus
+      - gir1.2-gtk-3.0
+      - jq
+      - pkexec | policykit-1
+      - rfkill
+    recommends:
+      - pipewire-pulse
+      - pulseaudio-utils
+      - xdg-user-dirs
+  rpm:
+    depends:
+      - bluez
+      - pipewire
+      - pipewire-utils
+      - wireplumber
+      - python3
+      - python3-gobject
+      - python3-dbus
+      - gtk3
+      - jq
+      - polkit
+      - util-linux
+    recommends:
+      - pipewire-pulseaudio
+      - pulseaudio-utils
+      - xdg-user-dirs
+  archlinux:
+    depends:
+      - bluez
+      - bluez-utils
+      - pipewire
+      - pipewire-audio
+      - wireplumber
+      - python
+      - python-gobject
+      - python-dbus
+      - gtk3
+      - jq
+      - polkit
+      - util-linux
+
+archlinux:
+  packager: Murilo Santiago <murilo.escobedo@protonmail.com>

@@ -15,13 +15,22 @@ Testado em Pop!_OS 24.04 · PipeWire 1.6 · WirePlumber 0.5 · BlueZ 5.72.
 
 ## Instalar
 
-**Pacote .deb** (Ubuntu/Pop!_OS/Debian): baixe o `.deb` da
-[última release](https://github.com/4snt/vitrola-bt/releases/latest) e
+Baixe o pacote da sua distro na [última release](https://github.com/4snt/vitrola-bt/releases/latest):
+
+| Distro | Arquivo | Instalar |
+|---|---|---|
+| Ubuntu 22.04+, Debian 12+, Pop!_OS, Mint | `vitrola-bt_*_all.deb` | `sudo apt install ./vitrola-bt_*_all.deb` |
+| Fedora 42+ | `vitrola-bt-*.noarch.rpm` | `sudo dnf install ./vitrola-bt-*.noarch.rpm` |
+| Arch, Manjaro, EndeavourOS | `vitrola-bt-*-any.pkg.tar.zst` | `sudo pacman -U vitrola-bt-*-any.pkg.tar.zst` |
+| Outras | `vitrola-bt-*.tar.gz` | extraia e rode `bin/vitrola instalar` |
+
+Depois, para aplicar as configs de áudio:
 
 ```bash
-sudo apt install ./vitrola-bt_*_all.deb
 systemctl --user restart wireplumber pipewire pipewire-pulse
 ```
+
+O CI instala cada pacote num contêiner da distro de verdade antes de publicar.
 
 **A partir do código:**
 
@@ -38,6 +47,13 @@ Abra **Vitrola BT** no menu de aplicativos (ou `vitrola-gui`):
 2. Na vitrola, ligue o Bluetooth e escolha **"Vitrola PC"**.
 3. Quando ela conectar, o som sai nos alto-falantes. **Gravar** salva FLAC em
    `~/Música/Vitrola` (ou `./gravacoes` no código clonado).
+
+**Ouvir / Parar** ligam e desligam a vitrola dos alto-falantes sem derrubar o Bluetooth
+(a gravação continua). Fechar a janela pode **minimizar para a bandeja** (ícone perto do
+relógio, com Ouvir/Parar e Sair) ou fechar de vez — escolha na própria janela. **Sair**
+(⏻ no topo ou no menu da bandeja) para o som, silencia a vitrola até o app abrir de novo
+e desliga o modo caixa de som. A bandeja usa o padrão StatusNotifier: COSMIC, KDE, XFCE,
+Budgie, Cinnamon, e GNOME com a extensão *AppIndicator*.
 
 ## Usar: terminal
 
@@ -66,12 +82,14 @@ O `receber`:
 
 ## Desenvolvimento
 
-O CI (GitHub Actions) roda `shellcheck`, `ruff`, valida o `.desktop` e gera o `.deb` a
-cada push/PR. Uma tag `vX.Y.Z` publica a release com o `.deb` anexado:
+A cada push/PR o CI (GitHub Actions) roda `shellcheck`, `ruff`, valida o `.desktop`, gera
+os pacotes com o [nFPM](https://nfpm.goreleaser.com/) e **instala cada um** em contêineres
+Ubuntu 24.04/22.04, Debian 12, Fedora 42 e Arch. Uma tag `vX.Y.Z` publica a release:
 
 ```bash
-packaging/build-deb.sh 0.1.0      # gera dist/vitrola-bt_0.1.0_all.deb localmente
-git tag v0.1.0 && git push --tags # release automática
+packaging/build.sh                     # gera tudo em dist/ (usa docker se não tiver nfpm)
+docker run --rm -v "$PWD:/src:ro" -w /src fedora:42 packaging/test-install.sh
+git tag v0.2.0 && git push --tags      # release automática
 ```
 
 ## O que as configs fazem

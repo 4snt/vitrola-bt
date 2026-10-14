@@ -208,7 +208,8 @@ cmd_fixar_a2dp() {
 }
 
 # O nó bluez_input é um Stream/Output/Audio: o WirePlumber já o liga sozinho no
-# alto-falante padrão, como um player. Ouvir/parar = criar/desfazer esse link.
+# alto-falante padrão, como um player (e precisa: sem consumidor a vitrola para
+# de transmitir). Ouvir/parar = criar/desfazer esse link; o stream segue vivo.
 default_sink() {
   pw-metadata 0 default.audio.sink 2>/dev/null | grep -oP '"name":"\K[^"]+' || true
 }
@@ -220,12 +221,14 @@ stream_name() {
 }
 
 cmd_ouvir() {
-  need pw-link pipewire-bin
+  need pw-link pipewire-bin; need wpctl wireplumber
   local name sink
   name="$(stream_name "${1:-}")"
   [[ -n "$name" ]] || die "vitrola não está transmitindo (rode: vitrola status)"
   sink="$(default_sink)"
   [[ -n "$sink" ]] || die "saída de som padrão não encontrada"
+  # Tira o mudo deixado pelo "Sair" do app (o WirePlumber lembra dele)
+  wpctl set-mute "$(bt_input_node "$(require_mac "${1:-}")" | jq -r .id)" 0 2>/dev/null || true
   pw-link "$name" "$sink" 2>/dev/null || true
   c_ok "Tocando em $sink (para parar: vitrola parar)"
 }

@@ -6,6 +6,7 @@ toca nos alto-falantes do PC (e pode ser gravado em FLAC).
 import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -18,12 +19,13 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gio, GLib, Gtk  # noqa: E402
 
-from vitrola_bt import agente  # noqa: E402
+from vitrola_bt import agente, bandeja  # noqa: E402
 
 APP_ID = "io.github._4snt.VitrolaBT"
 ALIAS = os.environ.get("VITROLA_ALIAS", "Vitrola PC")
 ROOT = Path(__file__).resolve().parent.parent
 POLL_MS = 2000
+PREFS = Path(GLib.get_user_config_dir()) / "vitrola-bt" / "gui.json"
 
 # Classe Bluetooth: 0x04 = Audio/Video; 0x14 = Loudspeaker. O PC por padrão é
 # Computer/Laptop, e o transmissor da vitrola esconde isso da busca.
@@ -47,6 +49,23 @@ def pasta_gravacoes():
         return local
     musica = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_MUSIC) or str(Path.home() / "Música")
     return Path(musica) / "Vitrola"
+
+
+def ler_prefs():
+    padrao = {"minimizar_bandeja": True, "tocar_auto": True}
+    try:
+        padrao.update(json.loads(PREFS.read_text()))
+    except (OSError, ValueError):
+        pass
+    return padrao
+
+
+def salvar_prefs(prefs):
+    try:
+        PREFS.parent.mkdir(parents=True, exist_ok=True)
+        PREFS.write_text(json.dumps(prefs, indent=2))
+    except OSError:
+        pass
 
 
 class Bluetooth:
@@ -140,6 +159,12 @@ def ligacoes_para_saidas(objs, node_id):
     ]
 
 
+def definir_mudo(node_id, mudo):
+    """Mudo no próprio stream da vitrola. O WirePlumber lembra desse estado e o
+    reaplica quando a vitrola reconecta, então "Sair" continua mudo com o app fechado."""
+    subprocess.run(["wpctl", "set-mute", str(node_id), "1" if mudo else "0"], capture_output=True)
+
+
 def saida_padrao():
     """node.name do alto-falante padrão (metadado default.audio.sink)."""
     out = subprocess.run(["pw-metadata", "0", "default.audio.sink"], capture_output=True, text=True).stdout
@@ -165,9 +190,15 @@ class Janela(Gtk.ApplicationWindow):
         self.arquivo_gravacao = None
         self.inicio_gravacao = 0.0
         self._mudando_switch = False
-        self._ultimo_estado = None
+        self._estado_bandeja = None
+        self._encerrado = False
+        self.prefs = ler_prefs()
 
         hb = Gtk.HeaderBar(show_close_button=True, title="Vitrola BT", subtitle="Bluetooth da vitrola no PC")
+        btn_sair = Gtk.Button.new_from_icon_name("system-shutdown-symbolic", Gtk.IconSize.BUTTON)
+        btn_sair.set_tooltip_text("Sair de vez: para o som e desliga o modo caixa de som")
+        btn_sair.connect("clicked", lambda _b: self.sair())
+        hb.pack_end(btn_sair)
         self.set_titlebar(hb)
 
         caixa = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14, margin=18)
@@ -209,8 +240,14 @@ class Janela(Gtk.ApplicationWindow):
         botoes.pack_end(btn_pasta, False, False, 0)
         caixa.pack_start(botoes, False, False, 0)
 
-        self.chk_auto = Gtk.CheckButton(label="Tocar automaticamente quando a vitrola conectar", active=True)
+        self.chk_auto = Gtk.CheckButton(label="Tocar automaticamente quando a vitrola conectar",
+                                        active=self.prefs["tocar_auto"])
+        self.chk_auto.connect("toggled", self._on_pref)
         caixa.pack_start(self.chk_auto, False, False, 0)
+        self.chk_bandeja = Gtk.CheckButton(label="Ao fechar a janela, continuar na bandeja (sem parar o som)",
+                                           active=self.prefs["minimizar_bandeja"])
+        self.chk_bandeja.connect("toggled", self._on_pref)
+        caixa.pack_start(self.chk_bandeja, False, False, 0)
 
         # Log
         exp = Gtk.Expander(label="Detalhes")
@@ -223,6 +260,17 @@ class Janela(Gtk.ApplicationWindow):
         caixa.pack_start(exp, True, True, 0)
 
         self.connect("delete-event", self._on_fechar)
+        self.bandeja = None
+        try:
+            sessao = dbus.SessionBus()
+            if bandeja.disponivel(sessao):
+                self.bandeja = bandeja.Bandeja(sessao, self._itens_bandeja, self._alternar_janela,
+                                               self._on_menu_bandeja)
+        except dbus.DBusException as e:
+            print(f"bandeja indisponível: {e}", flush=True)
+        if self.bandeja is None:
+            self.chk_bandeja.set_sensitive(False)
+            self.chk_bandeja.set_tooltip_text("Este desktop não tem bandeja do sistema (StatusNotifier)")
         self._atualizar()
         GLib.timeout_add(POLL_MS, self._tick)
 
@@ -291,7 +339,9 @@ class Janela(Gtk.ApplicationWindow):
         try:
             ad = self.bt.adaptador()
             if self.alias_original is None:
-                self.alias_original = str(ad.get("Alias", ""))
+                atual = str(ad.get("Alias", ""))
+                # Se o disfarce sobrou de uma sessão anterior, o original é o nome da máquina
+                self.alias_original = socket.gethostname() if atual in ("", ALIAS) else atual
             self.bt.set("Alias", dbus.String(ALIAS))
             self.bt.set("DiscoverableTimeout", dbus.UInt32(0))
             self.bt.set("Pairable", dbus.Boolean(True))
@@ -337,10 +387,13 @@ class Janela(Gtk.ApplicationWindow):
         self.links_saida = ligacoes_para_saidas(objs, novo["id"]) if novo else []
         if novo and not antes:
             self.log(f"Áudio chegando de {novo['descricao']} ({novo['codec'] or '?'}, {novo['rate']} Hz)")
+            # O WirePlumber já liga o stream nos alto-falantes (e precisa: sem
+            # consumidor a vitrola para de transmitir). Ajusta e tira o mudo do "Sair".
             if self.chk_auto.get_active() and not self.links_saida:
                 self._ligar_saida()
             elif not self.chk_auto.get_active() and self.links_saida:
                 self._desligar_saida()
+            definir_mudo(novo["id"], False)
         elif antes and not novo:
             self.log("A vitrola parou de transmitir / desconectou")
             self.btn_gravar.set_active(False)
@@ -383,6 +436,7 @@ class Janela(Gtk.ApplicationWindow):
         self.btn_ouvir.set_label("■  Parar de ouvir" if tocando else "▶  Ouvir")
         self.btn_ouvir.set_sensitive(s is not None)
         self.btn_gravar.set_sensitive(s is not None or self.btn_gravar.get_active())
+        self._atualizar_bandeja(tocando)
         if self.proc_gravar:
             seg = int(time.time() - self.inicio_gravacao)
             self.btn_gravar.set_label(f"■  Parar ({seg // 60:02d}:{seg % 60:02d})")
@@ -407,6 +461,7 @@ class Janela(Gtk.ApplicationWindow):
         if not sink:
             self.log("Não achei a saída de som padrão")
             return
+        definir_mudo(self.stream["id"], False)
         r = subprocess.run(["pw-link", self.stream["name"], sink], capture_output=True, text=True)
         if r.returncode == 0 or "File exists" in r.stderr:
             self.links_saida = self.links_saida or [-1]
@@ -457,12 +512,81 @@ class Janela(Gtk.ApplicationWindow):
         pasta.mkdir(parents=True, exist_ok=True)
         Gio.AppInfo.launch_default_for_uri(pasta.as_uri(), None)
 
+    # ---------- fechar / bandeja ----------
+
+    def _on_pref(self, _chk):
+        self.prefs["tocar_auto"] = self.chk_auto.get_active()
+        self.prefs["minimizar_bandeja"] = self.chk_bandeja.get_active()
+        salvar_prefs(self.prefs)
+
     def _on_fechar(self, *_):
+        if self.bandeja is not None and self.chk_bandeja.get_active():
+            self.hide()
+            self.log("Janela minimizada para a bandeja (o som continua)")
+            self._atualizar_bandeja(bool(self.stream and self.links_saida), forcar=True)
+            return True
+        self.encerrar()
+        return False
+
+    def encerrar(self):
+        """Fecha de verdade: para gravação e som e desliga o modo caixa de som."""
+        if self._encerrado:
+            return
+        self._encerrado = True
         if self.proc_gravar:
             self._parar(self.proc_gravar)
+            self.proc_gravar = None
+        if self.stream:
+            if self.links_saida:
+                self._desligar_saida()
+            definir_mudo(self.stream["id"], True)
         if self.agente is not None or self.switch.get_active():
             self._desligar_modo()
-        return False
+        if self.bandeja is not None:
+            self.bandeja.remover()
+            self.bandeja = None
+
+    def sair(self):
+        self.encerrar()
+        self.get_application().quit()
+
+    def _alternar_janela(self):
+        if self.get_visible():
+            self.hide()
+        else:
+            self.show_all()
+            self.present()
+        self._atualizar_bandeja(bool(self.stream and self.links_saida), forcar=True)
+
+    def _itens_bandeja(self):
+        itens = [(1, "Esconder janela" if self.get_visible() else "Mostrar janela")]
+        if self.stream:
+            itens.append((2, "Parar de ouvir" if self.links_saida else "Ouvir"))
+        itens += [(3, None), (4, "Sair (para o som)")]
+        return itens
+
+    def _on_menu_bandeja(self, item):
+        if item == 1:
+            self._alternar_janela()
+        elif item == 2 and self.stream:
+            self.btn_ouvir.set_active(not self.btn_ouvir.get_active())
+        elif item == 4:
+            self.sair()
+
+    def _atualizar_bandeja(self, tocando, forcar=False):
+        if self.bandeja is None:
+            return
+        estado = (tocando, bool(self.stream), self.get_visible())
+        if estado == self._estado_bandeja and not forcar:
+            return
+        self._estado_bandeja = estado
+        if tocando:
+            dica = f"Tocando: {self.stream['descricao']}"
+        elif self.stream:
+            dica = f"{self.stream['descricao']} conectada (sem som)"
+        else:
+            dica = "Aguardando a vitrola"
+        self.bandeja.atualizar(dica)
 
 
 class App(Gtk.Application):
@@ -479,7 +603,13 @@ class App(Gtk.Application):
 
 def main():
     app = App()
-    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, lambda: (app.janela and app.janela.close(), app.quit()))
+    def ao_sigint():
+        if app.janela:
+            app.janela.encerrar()
+        app.quit()
+        return GLib.SOURCE_REMOVE
+
+    GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGINT, ao_sigint)
     return app.run(sys.argv)
 
 
