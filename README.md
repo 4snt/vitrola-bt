@@ -1,3 +1,5 @@
+<p align="center"><img src="data/vitrola-bt.svg" width="128" alt="Ícone do Vitrola BT"></p>
+
 # vitrola-bt
 
 [![CI](https://github.com/4snt/vitrola-bt/actions/workflows/ci.yml/badge.svg)](https://github.com/4snt/vitrola-bt/actions/workflows/ci.yml)
@@ -19,11 +21,20 @@ Pop!_OS 24.04 / COSMIC · PipeWire 1.6 · WirePlumber 0.5 · BlueZ 5.72.
 - **Deck de verdade:** VU meters analógicos com lâmpada PEAK, analisador de espectro
   em LEDs, fita cassete com carretéis girando, contador e display com aparelho, chip,
   versão do Bluetooth, codec, bitpool e taxa.
+- **Equalizador gráfico de 10 bandas** (31 Hz a 16 kHz, ±12 dB) e as funções de um
+  receiver de vinil: **RUMBLE** (corta o ronco do motor abaixo de ~35 Hz), **SCRATCH**
+  (atenua chiado e estalos acima de ~8 kHz), **MONO** (discos mono antigos com menos
+  ruído de sulco), **LOUDNESS** (graves e agudos para ouvir baixo) e **BALANCE**. Tudo
+  só na escuta: o **REC grava o sinal original**, sem processamento.
 - **Teclas com trava mecânica:** PLAY e REC travam embaixo, STOP solta as duas.
   **REC** grava FLAC sem perdas em `~/Música/Vitrola`; **FITAS** abre a pasta.
 - **Alavanca BLUETOOTH:** liga e desliga o receptor. Desligada, a vitrola não toca.
-- **Reconexão automática:** sem a vitrola, o PC fica visível para ela voltar e também
-  a chama a cada 20 s; se ela conectar calada, o PC abre o áudio.
+- **Conexão automática:** chegou som, toca na hora no modo que a vitrola escolher; com
+  o link estável há 20 s, o app tenta o dual channel e volta para joint stereo se ele
+  travar. Sem a vitrola, o PC fica visível e a chama a cada 20 s (só o perfil certo);
+  se o sistema conectar o áudio ao contrário (PC → vitrola), o app corrige. Um
+  **guardião único** faz uma operação de conexão por vez, e um **cão de guarda** pede
+  o fluxo de novo se a vitrola parar de mandar pacotes.
 - **Uma janela só** (abrir de novo traz a existente para a frente), ícone na
   **bandeja** (COSMIC, KDE, XFCE, GNOME com AppIndicator) e fechamento seguro.
 - **Disfarce de caixa de som sem senha:** o pacote instala uma regra do polkit que
@@ -55,6 +66,10 @@ Abra **Vitrola BT** no menu de aplicativos:
 1. Suba a alavanca **BLUETOOTH**.
 2. Na vitrola, ligue o Bluetooth e escolha **"Vitrola PC"**.
 3. O som sai nos alto-falantes. **REC** grava; **AJUSTES** e **REGISTRO** ficam no painel.
+
+No equalizador, arraste os cursores (duplo clique zera, **FLAT** zera todos); no
+**BALANCE**, arraste para cima ou para baixo (duplo clique centraliza). Os ajustes
+ficam salvos.
 
 No terminal, o mesmo motor sem janela:
 
@@ -124,6 +139,7 @@ git tag v0.3.0 && git push --tags     # o CI publica a release
 
 Estrutura: `src/receptor.rs` (endpoint A2DP), `src/audio.rs` (thread de áudio),
 `src/sbc.rs` (libsbc), `src/flac.rs` (codificador FLAC), `src/medidor.rs` (VU e FFT),
+`src/dsp.rs` (equalizador e filtros), `src/saida.rs` (saída com buffer anti-jitter),
 `src/desenho.rs` e `src/ui.rs` (o deck, em egui), `src/backend.rs` (alavanca,
 disfarce, reconexão), `src/bandeja.rs` e `src/instancia.rs`.
 
@@ -136,6 +152,8 @@ ainda é só Linux; no Windows o caminho será a API `AudioPlaybackConnection`.
   visível". Se aparecer "computador", o disfarce não foi aplicado (sem o pacote, ele pede senha).
 - **Estalos ou cortes:** aproxime a vitrola e afaste-a do roteador 2.4 GHz.
 - **Sem som com a vitrola conectada:** abra o REGISTRO e aperte PLAY.
+- **Conecte pelo botão da vitrola (ou deixe o app reconectar).** O applet de Bluetooth
+  do sistema pode conectar o lado "caixa de som" do chip; o app corrige, mas leva alguns segundos.
 
 ## Licença
 

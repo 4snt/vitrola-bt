@@ -5,6 +5,7 @@
 #![cfg_attr(not(target_os = "linux"), allow(dead_code))]
 
 mod desenho;
+mod dsp;
 mod estado;
 mod flac;
 mod medidor;
@@ -80,6 +81,7 @@ fn main() {
     let _ = &tx_ui;
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<Comando>();
     let prefs = prefs::Prefs::carregar();
+    c.trava().som = prefs.som.clone();
 
     // Instância única (só para a janela; o modo terminal pode rodar à parte)
     #[cfg(target_os = "linux")]
@@ -163,8 +165,8 @@ fn main() {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Vitrola BT")
         .with_app_id(APP_ID)
-        .with_inner_size([960.0, 661.0])
-        .with_min_inner_size([680.0, 469.0]);
+        .with_inner_size([900.0, 780.0])
+        .with_min_inner_size([640.0, 555.0]);
     if let Some(i) = icone() {
         viewport = viewport.with_icon(i);
     }

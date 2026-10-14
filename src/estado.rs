@@ -42,6 +42,9 @@ pub struct Estado {
     pub aviso: Option<String>,
     /// Trabalhador de áudio atual (só ele atualiza tocando/gravando).
     pub trabalhador_ativo: u64,
+    /// Equalizador e funções de escuta; `som_versao` muda a cada ajuste.
+    pub som: crate::dsp::Som,
+    pub som_versao: u64,
 }
 
 impl Estado {

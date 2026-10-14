@@ -487,8 +487,17 @@ impl Receptor {
             .map(|v| v.iter().copied().filter(|i| agora.duration_since(*i) < JANELA).collect())
             .unwrap_or_default();
         if recentes.len() >= TENTATIVAS {
+            // avisa uma vez por janela (o backend chama isto a cada segundo)
+            let avisar = recentes.len() == TENTATIVAS;
+            let mut cheio = recentes;
+            if avisar {
+                cheio.push(agora);
+            }
+            t.insert(dispositivo.to_string(), cheio);
             drop(t);
-            self.c.log("O transmissor insiste na própria configuração; mantendo a dele por enquanto");
+            if avisar {
+                self.c.log("Muitas tentativas seguidas: esperando a vitrola se acalmar antes de tentar de novo");
+            }
             return false;
         }
         let mut novas = recentes;
@@ -517,6 +526,18 @@ impl Receptor {
 
     /// O PC abre o A2DP (o BlueZ chama nosso SelectConfiguration). Exige o guardião.
     async fn abrir_a2dp(self: &Arc<Self>, dispositivo: &str) {
+        // Conectada pelo applet do sistema, o BlueZ pode abrir o A2DP ao contrário
+        // (PC -> vitrola, tratando o lado receptor do chip como caixa de som); isso
+        // ocupa a conexão de áudio e o sentido certo dá "busy". Desfaz primeiro.
+        if let Ok(objs) = bluez::objetos(&self.conn).await {
+            if !bluez::transportes_no_sentido_errado(&objs, dispositivo).is_empty() {
+                // Desfazer só o perfil deixa o AVDTP num estado em que a vitrola recusa
+                // a conexão nova; desconectando tudo, ela volta limpa
+                self.c.log("O sistema conectou o áudio ao contrário (PC → vitrola): reconectando no sentido certo");
+                let _ = bluez::chamar(&self.conn, dispositivo, "org.bluez.Device1", "Disconnect", &()).await;
+                tokio::time::sleep(Duration::from_secs(2)).await;
+            }
+        }
         let r =
             bluez::chamar(&self.conn, dispositivo, "org.bluez.Device1", "ConnectProfile", &(UUID_A2DP_SOURCE,)).await;
         if let Err(e) = r {

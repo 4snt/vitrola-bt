@@ -537,3 +537,121 @@ pub fn display(p: &Painter, r: Rect, linhas: &[(&str, String)]) {
         &[(0.0, Color32::from_white_alpha(14)), (1.0, Color32::TRANSPARENT)],
     );
 }
+
+// ---------- equalizador gráfico e funções ----------
+
+/// Cursor deslizante de equalizador: trilho escuro, escala e capa prateada.
+/// `ganho` em dB (-12..+12).
+pub fn cursor_eq(p: &Painter, r: Rect, ganho: f32, rotulo: &str) {
+    let k = r.height() / 120.0;
+    let trilho = Rect::from_center_size(pos2(r.center().x, r.top() + 54.0 * k), vec2(4.0 * k, 92.0 * k));
+    // escala: +12, 0, -12
+    for (i, db) in [12.0f32, 6.0, 0.0, -6.0, -12.0].iter().enumerate() {
+        let y = trilho.top() + trilho.height() * i as f32 / 4.0;
+        let largura = if *db == 0.0 { 10.0 } else { 6.0 } * k;
+        p.line_segment(
+            [pos2(trilho.left() - largura - 2.0 * k, y), pos2(trilho.left() - 2.0 * k, y)],
+            Stroke::new(1.0_f32, rgb(52, 52, 52)),
+        );
+        p.line_segment(
+            [pos2(trilho.right() + 2.0 * k, y), pos2(trilho.right() + largura + 2.0 * k, y)],
+            Stroke::new(1.0_f32, rgb(52, 52, 52)),
+        );
+    }
+    p.rect_filled(trilho, Rounding::same(2.0 * k), rgb(12, 12, 12));
+    p.rect_stroke(trilho, Rounding::same(2.0 * k), Stroke::new(1.0_f32, Color32::from_white_alpha(120)));
+    let frac = (ganho.clamp(-12.0, 12.0) + 12.0) / 24.0;
+    let y = trilho.bottom() - frac * trilho.height();
+    let capa = Rect::from_center_size(pos2(trilho.center().x, y), vec2(22.0 * k, 12.0 * k));
+    p.rect_filled(capa.translate(vec2(1.5 * k, 2.0 * k)), Rounding::same(2.0 * k), Color32::from_black_alpha(70));
+    grad_v(p, capa, &[(0.0, rgb(250, 250, 248)), (0.5, rgb(196, 195, 190)), (1.0, rgb(150, 149, 144))]);
+    p.rect_stroke(capa, Rounding::same(2.0 * k), Stroke::new(1.0_f32, rgb(90, 90, 86)));
+    p.line_segment(
+        [pos2(capa.left() + 2.0 * k, y), pos2(capa.right() - 2.0 * k, y)],
+        Stroke::new(1.5 * k, rgb(40, 40, 40)),
+    );
+    p.text(
+        pos2(r.center().x, r.bottom() - 2.0 * k),
+        Align2::CENTER_BOTTOM,
+        rotulo,
+        FontId::proportional(9.0 * k),
+        rgb(40, 40, 40),
+    );
+}
+
+/// Botão de função quadrado (aperta e trava) com lâmpada âmbar em cima.
+pub fn botao_funcao(p: &Painter, r: Rect, rotulo: &str, ligado: bool) {
+    let k = r.height() / 50.0;
+    led(p, pos2(r.center().x, r.top() + 5.0 * k), 3.5 * k, rgb(255, 176, 50), ligado);
+    let corpo = Rect::from_min_max(pos2(r.left(), r.top() + 13.0 * k), pos2(r.right(), r.bottom() - 13.0 * k));
+    let desce = if ligado { 2.0 * k } else { 0.0 };
+    p.rect_filled(corpo.translate(vec2(0.0, 3.0 * k)), Rounding::same(2.0 * k), rgb(92, 91, 87));
+    let face = corpo.translate(vec2(0.0, desce));
+    if ligado {
+        grad_v(p, face, &[(0.0, rgb(180, 179, 174)), (1.0, rgb(212, 211, 206))]);
+    } else {
+        grad_v(p, face, &[(0.0, rgb(252, 252, 250)), (1.0, rgb(184, 183, 178))]);
+    }
+    p.rect_stroke(face, Rounding::same(2.0 * k), Stroke::new(1.0_f32, rgb(100, 99, 95)));
+    p.text(
+        pos2(r.center().x, r.bottom()),
+        Align2::CENTER_BOTTOM,
+        rotulo,
+        FontId::proportional(8.0 * k),
+        rgb(38, 38, 38),
+    );
+}
+
+/// Botão giratório cromado recartilhado. `valor` em -1..+1 (-135°..+135°).
+pub fn botao_giratorio(p: &Painter, c: Pos2, raio: f32, valor: f32, rotulo_esq: &str, rotulo_dir: &str) {
+    // escala em volta
+    for i in 0..=10 {
+        let a = (-135.0 + 27.0 * i as f32).to_radians();
+        let (s, co) = a.sin_cos();
+        let (r1, r2) = (raio * 1.18, raio * if i % 5 == 0 { 1.36 } else { 1.27 });
+        p.line_segment(
+            [pos2(c.x + r1 * s, c.y - r1 * co), pos2(c.x + r2 * s, c.y - r2 * co)],
+            Stroke::new(1.2_f32, rgb(48, 48, 48)),
+        );
+    }
+    p.text(
+        pos2(c.x - raio * 1.25, c.y + raio * 1.15),
+        Align2::CENTER_TOP,
+        rotulo_esq,
+        FontId::proportional(raio * 0.42),
+        rgb(40, 40, 40),
+    );
+    p.text(
+        pos2(c.x + raio * 1.25, c.y + raio * 1.15),
+        Align2::CENTER_TOP,
+        rotulo_dir,
+        FontId::proportional(raio * 0.42),
+        rgb(40, 40, 40),
+    );
+    p.circle_filled(c + vec2(1.5, 2.5), raio, Color32::from_black_alpha(70));
+    p.circle_filled(c, raio, rgb(70, 70, 70));
+    // recartilhado
+    for i in 0..48 {
+        let a = i as f32 * PI / 24.0;
+        let (s, co) = a.sin_cos();
+        p.line_segment(
+            [pos2(c.x + raio * 0.86 * s, c.y - raio * 0.86 * co), pos2(c.x + raio * s, c.y - raio * co)],
+            Stroke::new(1.0_f32, if i % 2 == 0 { rgb(210, 210, 208) } else { rgb(110, 110, 108) }),
+        );
+    }
+    let topo = Rect::from_center_size(c, vec2(raio * 1.7, raio * 1.7));
+    grad_radial(
+        &p.with_clip_rect(topo),
+        topo,
+        c + vec2(-raio * 0.3, -raio * 0.35),
+        raio * 1.1,
+        &[(0.0, rgb(255, 255, 255)), (0.55, rgb(196, 196, 194)), (1.0, rgb(98, 98, 96))],
+    );
+    p.circle_stroke(c, raio * 0.85, Stroke::new(1.0_f32, rgb(90, 90, 88)));
+    let a = (valor.clamp(-1.0, 1.0) * 135.0).to_radians();
+    let (s, co) = a.sin_cos();
+    p.line_segment(
+        [pos2(c.x + raio * 0.25 * s, c.y - raio * 0.25 * co), pos2(c.x + raio * 0.78 * s, c.y - raio * 0.78 * co)],
+        Stroke::new(raio * 0.12, rgb(45, 45, 45)),
+    );
+}

@@ -10,6 +10,7 @@ use std::sync::mpsc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+use crate::dsp::Processador;
 use crate::estado::Compartilhado;
 use crate::flac::Flac;
 use crate::medidor::Medidor;
@@ -97,6 +98,12 @@ fn laco(
     let mut pacote = vec![0u8; mtu.max(1024)];
     let mut pcm = Vec::with_capacity(16 * 1024);
     let mut medidor = Medidor::novo(cfg.rate);
+    let (som, mut versao_som) = {
+        let e = c.trava();
+        (e.som.clone(), e.som_versao)
+    };
+    let mut dsp = Processador::novo(cfg.rate, &som);
+    let mut escuta: Vec<u8> = Vec::with_capacity(16 * 1024);
     let mut saida: Option<Saida> = None;
     let mut gravacao: Option<(Flac, PathBuf)> = None;
 
@@ -170,8 +177,20 @@ fn laco(
             }
             c.repintar.pedir();
         }
+        {
+            // ajustes de som mudaram na interface?
+            let e = c.trava();
+            if e.som_versao != versao_som {
+                versao_som = e.som_versao;
+                dsp.definir(&e.som);
+            }
+        }
         if let Some(s) = saida.as_mut() {
-            if s.escrever(&pcm).is_err() {
+            // o EQ só afeta o que se ouve; o REC grava o sinal original
+            escuta.clear();
+            escuta.extend_from_slice(&pcm);
+            dsp.processar(&mut escuta);
+            if s.escrever(&escuta).is_err() {
                 c.log("A saída de som fechou (pw-cat)");
                 saida = None;
                 atualizar(&c, id, false, &gravacao);

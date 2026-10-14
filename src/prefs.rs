@@ -11,11 +11,13 @@ pub struct Prefs {
     pub tocar_auto: bool,
     /// Fechar a janela minimiza (e a bandeja mantém o app) em vez de sair.
     pub minimizar_bandeja: bool,
+    /// Equalizador e funções de escuta.
+    pub som: crate::dsp::Som,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Prefs { tocar_auto: true, minimizar_bandeja: false }
+        Prefs { tocar_auto: true, minimizar_bandeja: false, som: Default::default() }
     }
 }
 

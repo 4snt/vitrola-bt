@@ -17,8 +17,11 @@ use crate::prefs::Prefs;
 use crate::sbc;
 
 const LARG: f32 = 900.0;
-const ALT: f32 = 620.0;
+const ALT: f32 = 780.0;
 const VOLTA_FITA_S: f32 = 30.0 * 60.0;
+
+/// Botão de função: rótulo, dica e o campo dos ajustes que ele liga/desliga.
+type Funcao = (&'static str, &'static str, fn(&mut crate::dsp::Som) -> &mut bool);
 
 /// Cópia do estado para desenhar um quadro sem segurar a trava.
 struct Visao {
@@ -57,6 +60,7 @@ pub struct App {
     ver_ajustes: bool,
     ver_registro: bool,
     saindo: bool,
+    som_sujo: bool,
     /// Desenvolvimento: VITROLA_CAPTURA=arquivo.png salva uma foto da janela.
     captura: Option<(PathBuf, Instant, bool)>,
 }
@@ -94,6 +98,7 @@ impl App {
             ver_ajustes: false,
             ver_registro: false,
             saindo: false,
+            som_sujo: false,
             captura: std::env::var_os("VITROLA_CAPTURA").map(|c| (PathBuf::from(c), agora, false)),
         }
     }
@@ -248,12 +253,16 @@ impl App {
         ];
         d::display(&p, r_(380.0, 226.0, 458.0, 192.0), &linhas);
 
+        // faixa 3: equalizador gráfico e funções de receiver (só a escuta;
+        // o REC grava o sinal original)
+        self.desenhar_eq(ui, &p, &p_, &r_, s);
+
         // deck: marca, contador, teclas, alavanca e LEDs
         let tinta = rgb(34, 34, 34);
-        d::gravado(&p, p_(64.0, 446.0), Align2::LEFT_TOP, "V I T R O L A   B T", fonte(23.0), tinta);
-        d::gravado(&p, p_(64.0, 478.0), Align2::LEFT_TOP, "STEREO CASSETTE DECK", fonte(8.5), tinta);
-        d::contador(&p, r_(64.0, 500.0, 150.0, 46.0), seg as u64);
-        d::gravado(&p, p_(139.0, 552.0), Align2::CENTER_TOP, "TAPE COUNTER", fonte(8.0), tinta);
+        d::gravado(&p, p_(64.0, 606.0), Align2::LEFT_TOP, "V I T R O L A   B T", fonte(23.0), tinta);
+        d::gravado(&p, p_(64.0, 638.0), Align2::LEFT_TOP, "STEREO CASSETTE DECK", fonte(8.5), tinta);
+        d::contador(&p, r_(64.0, 660.0, 150.0, 46.0), seg as u64);
+        d::gravado(&p, p_(139.0, 712.0), Align2::CENTER_TOP, "TAPE COUNTER", fonte(8.0), tinta);
 
         let tem_audio = v.fluxo.is_some();
         let parado = !(v.tocando || v.gravando.is_some());
@@ -264,7 +273,7 @@ impl App {
             (Icone::Eject, "FITAS", 474.0, false, true, "eject"),
         ];
         for (icone, rotulo, x, travada, habilitada, id) in teclas {
-            let r = r_(x, 470.0, 70.0, 76.0);
+            let r = r_(x, 630.0, 70.0, 76.0);
             let resp = ui.interact(r, ui.id().with(id), if habilitada { Sense::click() } else { Sense::hover() });
             let segurando = habilitada && resp.is_pointer_button_down_on();
             d::tecla(&p, r, icone, rotulo, travada || segurando, habilitada);
@@ -278,7 +287,7 @@ impl App {
                 }
             }
         }
-        d::gravado(&p, p_(318.0, 552.0), Align2::LEFT_TOP, "TRAVA MECÂNICA: STOP SOLTA PLAY E REC", fonte(7.5), tinta);
+        d::gravado(&p, p_(318.0, 712.0), Align2::LEFT_TOP, "TRAVA MECÂNICA: STOP SOLTA PLAY E REC", fonte(7.5), tinta);
 
         // alavanca BLUETOOTH
         if self
@@ -288,10 +297,10 @@ impl App {
             self.alavanca_pendente = None;
         }
         let ligado = self.alavanca_pendente.map(|(a, _)| a).unwrap_or(v.receptor_ligado);
-        d::gravado(&p, p_(640.0, 446.0), Align2::CENTER_TOP, "BLUETOOTH", fonte(9.0), tinta);
-        d::gravado(&p, p_(640.0, 462.0), Align2::CENTER_TOP, "ON", fonte(8.0), tinta);
-        d::gravado(&p, p_(640.0, 566.0), Align2::CENTER_BOTTOM, "OFF", fonte(8.0), tinta);
-        let r_alav = r_(600.0, 472.0, 80.0, 84.0);
+        d::gravado(&p, p_(640.0, 606.0), Align2::CENTER_TOP, "BLUETOOTH", fonte(9.0), tinta);
+        d::gravado(&p, p_(640.0, 622.0), Align2::CENTER_TOP, "ON", fonte(8.0), tinta);
+        d::gravado(&p, p_(640.0, 726.0), Align2::CENTER_BOTTOM, "OFF", fonte(8.0), tinta);
+        let r_alav = r_(600.0, 632.0, 80.0, 84.0);
         d::alavanca(&p, r_alav, ligado);
         let resp = ui
             .interact(r_alav, ui.id().with("alavanca"), Sense::click())
@@ -309,14 +318,14 @@ impl App {
             ("REC", rgb(255, 59, 47), v.gravando.is_some()),
         ];
         for (i, (rotulo, cor, aceso)) in leds.iter().enumerate() {
-            let y = 474.0 + i as f32 * 22.0;
+            let y = 634.0 + i as f32 * 22.0;
             d::led(&p, p_(722.0, y), 5.0 * s, *cor, *aceso);
             d::gravado(&p, p_(736.0, y), Align2::LEFT_CENTER, rotulo, fonte(8.5), tinta);
         }
 
         // atalhos gravados no painel
         for (x, rotulo, alvo) in [(784.0, "AJUSTES", 0), (784.0, "REGISTRO", 1)] {
-            let y = if alvo == 0 { 474.0 } else { 496.0 };
+            let y = if alvo == 0 { 634.0 } else { 656.0 };
             let r = r_(x, y - 8.0, 60.0, 16.0);
             let resp =
                 ui.interact(r, ui.id().with(rotulo), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
@@ -333,7 +342,131 @@ impl App {
 
         // linha de status
         let status = status(v);
-        d::gravado(&p, p_(64.0, 590.0), Align2::LEFT_TOP, &status, fonte(10.5), rgb(52, 52, 52));
+        d::gravado(&p, p_(64.0, 750.0), Align2::LEFT_TOP, &status, fonte(10.5), rgb(52, 52, 52));
+    }
+
+    fn aplicar_som(&mut self) {
+        {
+            let mut e = self.c.trava();
+            e.som = self.prefs.som.clone();
+            e.som_versao += 1;
+        }
+        self.som_sujo = true;
+    }
+
+    fn desenhar_eq(
+        &mut self,
+        ui: &mut egui::Ui,
+        p: &egui::Painter,
+        p_: &dyn Fn(f32, f32) -> egui::Pos2,
+        r_: &dyn Fn(f32, f32, f32, f32) -> Rect,
+        s: f32,
+    ) {
+        let tinta = rgb(34, 34, 34);
+        let fonte = |t: f32| FontId::proportional(t * s);
+        let painel = r_(50.0, 440.0, 800.0, 154.0);
+        d::grad_v(p, painel, &[(0.0, Color32::from_black_alpha(22)), (1.0, Color32::from_black_alpha(6))]);
+        p.rect_stroke(painel, Rounding::same(4.0 * s), egui::Stroke::new(1.0_f32, Color32::from_black_alpha(70)));
+        p.line_segment(
+            [painel.left_bottom(), painel.right_bottom()],
+            egui::Stroke::new(1.0_f32, Color32::from_white_alpha(170)),
+        );
+        d::gravado(p, p_(64.0, 446.0), Align2::LEFT_TOP, "GRAPHIC EQUALIZER", fonte(8.5), tinta);
+        d::gravado(p, p_(520.0, 446.0), Align2::LEFT_TOP, "FILTERS", fonte(8.5), tinta);
+        d::gravado(p, p_(806.0, 446.0), Align2::CENTER_TOP, "BALANCE", fonte(8.5), tinta);
+        let mut mudou = false;
+        let mut soltou = false;
+
+        // FLAT: zera o equalizador
+        let r_flat = r_(440.0, 444.0, 60.0, 14.0);
+        let resp = ui
+            .interact(r_flat, ui.id().with("eq-flat"), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let cor = if resp.hovered() { rgb(150, 30, 20) } else { tinta };
+        d::gravado(p, pos2(r_flat.right(), r_flat.center().y), Align2::RIGHT_CENTER, "FLAT", fonte(8.5), cor);
+        if resp.clicked() {
+            self.prefs.som.ganhos = [0.0; 10];
+            mudou = true;
+            soltou = true;
+        }
+
+        let rotulos = ["31", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k"];
+        for (i, rotulo) in rotulos.iter().enumerate() {
+            let r = r_(64.0 + i as f32 * 44.0, 462.0, 40.0, 126.0);
+            let resp = ui.interact(r, ui.id().with(("eq", i)), Sense::click_and_drag());
+            let resp = resp.on_hover_cursor(egui::CursorIcon::ResizeVertical);
+            if resp.double_clicked() {
+                self.prefs.som.ganhos[i] = 0.0;
+                mudou = true;
+                soltou = true;
+            } else if resp.dragged() || resp.clicked() {
+                if let Some(pt) = resp.interact_pointer_pos() {
+                    let k = r.height() / 120.0;
+                    let (topo, alt) = (r.top() + 54.0 * k - 46.0 * k, 92.0 * k);
+                    let mut g = ((topo + alt - pt.y) / alt * 24.0 - 12.0).clamp(-12.0, 12.0);
+                    if g.abs() < 0.6 {
+                        g = 0.0; // trava no centro
+                    }
+                    g = (g * 2.0).round() / 2.0;
+                    if g != self.prefs.som.ganhos[i] {
+                        self.prefs.som.ganhos[i] = g;
+                        mudou = true;
+                    }
+                }
+            }
+            soltou |= resp.drag_stopped() || resp.clicked();
+            d::cursor_eq(p, r, self.prefs.som.ganhos[i], rotulo);
+        }
+
+        let funcoes: [Funcao; 4] = [
+            ("RUMBLE", "Corta o ronco do motor e do prato (abaixo de ~35 Hz)", |s| &mut s.rumble),
+            ("SCRATCH", "Atenua chiado e estalos do disco (acima de ~8 kHz)", |s| &mut s.scratch),
+            ("MONO", "Soma os canais: discos mono antigos ficam com menos ruído", |s| &mut s.mono),
+            ("LOUDNESS", "Reforça graves e agudos para ouvir baixo", |s| &mut s.loudness),
+        ];
+        for (j, (rotulo, dica, campo)) in funcoes.iter().enumerate() {
+            let r = r_(522.0 + j as f32 * 60.0, 474.0, 52.0, 62.0);
+            let resp = ui
+                .interact(r, ui.id().with(("func", j)), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(*dica);
+            if resp.clicked() {
+                let v = campo(&mut self.prefs.som);
+                *v = !*v;
+                mudou = true;
+                soltou = true;
+            }
+            let ligado = *campo(&mut self.prefs.som);
+            d::botao_funcao(p, r, rotulo, ligado);
+        }
+        d::gravado(p, p_(522.0, 552.0), Align2::LEFT_TOP, "SÓ NA ESCUTA: O REC GRAVA O ORIGINAL", fonte(7.0), tinta);
+
+        // BALANCE: arraste para cima/baixo, duplo clique centraliza
+        let c = p_(806.0, 512.0);
+        let raio = 22.0 * s;
+        let r_bal = Rect::from_center_size(c, egui::vec2(raio * 2.6, raio * 2.6));
+        let resp = ui
+            .interact(r_bal, ui.id().with("balance"), Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::ResizeVertical);
+        if resp.double_clicked() {
+            self.prefs.som.balanco = 0.0;
+            mudou = true;
+            soltou = true;
+        } else if resp.dragged() {
+            let b = (self.prefs.som.balanco - resp.drag_delta().y / (80.0 * s)).clamp(-1.0, 1.0);
+            self.prefs.som.balanco = if b.abs() < 0.04 { 0.0 } else { b };
+            mudou = true;
+        }
+        soltou |= resp.drag_stopped();
+        d::botao_giratorio(p, c, raio, self.prefs.som.balanco, "L", "R");
+
+        if mudou {
+            self.aplicar_som();
+        }
+        if soltou && self.som_sujo {
+            self.prefs.salvar();
+            self.som_sujo = false;
+        }
     }
 
     fn janelas(&mut self, ctx: &egui::Context) {

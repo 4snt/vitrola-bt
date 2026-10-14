@@ -144,6 +144,19 @@ pub fn conhecidos(objs: &Objetos) -> Vec<Dispositivo> {
         .collect()
 }
 
+/// Transportes A2DP sob um dispositivo em que o PC é a FONTE (áudio saindo do
+/// PC para o aparelho): o UUID do transporte é o do endpoint local (Audio Source).
+pub fn transportes_no_sentido_errado(objs: &Objetos, dispositivo: &str) -> Vec<String> {
+    let prefixo = format!("{dispositivo}/");
+    objs.iter()
+        .filter(|(p, _)| p.as_str().starts_with(&prefixo))
+        .filter_map(|(p, ifs)| {
+            let t = ifs.iter().find(|(n, _)| n.as_str() == "org.bluez.MediaTransport1")?.1;
+            (como_str(t, "UUID").as_deref() == Some(UUID_A2DP_SOURCE)).then(|| p.as_str().to_string())
+        })
+        .collect()
+}
+
 /// Endpoints SBC remotos (do transmissor) sob um dispositivo: (caminho, capacidades).
 pub fn seps_sbc(objs: &Objetos, dispositivo: &str) -> Vec<(String, Vec<u8>)> {
     let prefixo = format!("{dispositivo}/");

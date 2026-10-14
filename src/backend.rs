@@ -332,7 +332,9 @@ impl Backend {
             let _guarda = guarda;
             let r = tokio::time::timeout(
                 Duration::from_secs(15),
-                bluez::chamar(&conn, &d.caminho, "org.bluez.Device1", "Connect", &()),
+                // só o perfil certo (vitrola como fonte de áudio): o Connect também
+                // conectaria o lado "caixa de som" dela, no sentido errado
+                bluez::chamar(&conn, &d.caminho, "org.bluez.Device1", "ConnectProfile", &(bluez::UUID_A2DP_SOURCE,)),
             )
             .await;
             if matches!(r, Ok(Ok(_))) {
