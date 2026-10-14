@@ -6,8 +6,8 @@
 
 Ouça e grave no Linux o áudio Bluetooth de uma **vitrola**. O PC se passa por
 **caixa de som Bluetooth**, a vitrola pareia nele, o disco toca nos alto-falantes
-do PC — ou vira um FLAC — e tudo aparece num **sistema hi-fi empilhado** dos anos 70/80:
-DAC Bluetooth, receiver, equalizador gráfico e tape deck num gabinete de nogueira.
+do PC — ou vira um FLAC — e tudo aparece num **sistema hi-fi de rack** dos anos 70/80:
+DAC Bluetooth, receiver, equalizador gráfico e tape deck, com VU verdes iluminados.
 
 ![O rack do Vitrola BT](docs/deck.png)
 
@@ -23,9 +23,13 @@ Pop!_OS 24.04 / COSMIC · PipeWire 1.6 · WirePlumber 0.5 · BlueZ 5.72.
   - **VB-DAC1 (Bluetooth DAC):** VU de **entrada** (o que chega da vitrola) e display com
     aparelho, endereço, chip, versão do Bluetooth, codec, bitpool e taxa.
   - **VB-7000 (receiver):** VU de **saída** (depois do EQ, filtros e volume) com lâmpada
-    PEAK, **VOLUME**, **BALANCE**, alavanca BLUETOOTH, funções e o botão **HI-FI**.
+    PEAK e uma segunda tela com o que sai (dispositivo e volume do sistema, volume, EQ,
+    filtros, balance, estado); embaixo, **VOLUME**, **BALANCE**, alavanca BLUETOOTH,
+    funções e o botão **HI-FI**.
   - **VB-EQ10 (equalizador):** analisador de espectro da **saída** e os 10 cursores.
   - **VB-C70 (tape deck):** fita com carretéis girando, contador e teclas de piano.
+  - O rack ocupa toda a largura da janela e rola na vertical quando ela é baixa. Os VU
+    podem ser verdes, azuis (estilo McIntosh) ou âmbar (em AJUSTES).
 - **HI-FI:** renegocia o SBC dual channel (~396 kbps) na hora; a lâmpada acende quando
   ele está ativo. Sem apertar nada, o app tenta o dual a cada minuto com o link estável.
 - **Equalizador gráfico de 10 bandas** (31 Hz a 16 kHz, ±12 dB) e as funções de um

@@ -264,6 +264,7 @@ impl Backend {
         if self.desejado && self.receptor.is_some() {
             self.manter_conexao(&objs, &fontes).await;
         }
+        self.ler_saida_do_sistema();
         self.c.repintar.pedir();
     }
 
@@ -348,6 +349,32 @@ impl Backend {
                 c.log(format!("{} reconectada pelo PC", d.nome));
             }
             flag.store(false, Ordering::SeqCst);
+        });
+    }
+
+    /// Nome e volume da saída de som padrão (wpctl), em paralelo e sem bloquear.
+    fn ler_saida_do_sistema(&self) {
+        let c = self.c.clone();
+        tokio::spawn(async move {
+            let rodar = |args: &'static [&'static str]| async move {
+                tokio::time::timeout(Duration::from_secs(2), Command::new("wpctl").args(args).output())
+                    .await
+                    .ok()
+                    .and_then(|r| r.ok())
+                    .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+                    .unwrap_or_default()
+            };
+            let info = rodar(&["inspect", "@DEFAULT_AUDIO_SINK@"]).await;
+            let nome = info
+                .lines()
+                .find_map(|l| l.trim().trim_start_matches('*').trim().strip_prefix("node.description = "))
+                .map(|v| v.trim().trim_matches('"').to_string());
+            let vol = rodar(&["get-volume", "@DEFAULT_AUDIO_SINK@"]).await;
+            let volume =
+                vol.split_whitespace().nth(1).and_then(|v| v.parse::<f32>().ok()).map(|v| (v, vol.contains("MUTED")));
+            let mut e = c.trava();
+            e.saida_dispositivo = nome;
+            e.saida_volume = volume;
         });
     }
 

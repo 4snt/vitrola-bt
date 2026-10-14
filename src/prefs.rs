@@ -13,11 +13,21 @@ pub struct Prefs {
     pub minimizar_bandeja: bool,
     /// Equalizador e funções de escuta.
     pub som: crate::dsp::Som,
+    /// Iluminação dos VU.
+    pub tema_vu: crate::desenho::TemaVu,
+    /// Posição da alavanca BLUETOOTH: o app abre como foi deixado.
+    pub bluetooth_ligado: bool,
 }
 
 impl Default for Prefs {
     fn default() -> Self {
-        Prefs { tocar_auto: true, minimizar_bandeja: false, som: Default::default() }
+        Prefs {
+            tocar_auto: true,
+            minimizar_bandeja: false,
+            som: Default::default(),
+            tema_vu: Default::default(),
+            bluetooth_ligado: true,
+        }
     }
 }
 

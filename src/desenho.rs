@@ -100,26 +100,6 @@ pub fn textura_aluminio() -> ColorImage {
     ColorImage::from_rgba_unmultiplied([w, h], &px)
 }
 
-/// Nogueira: veios verticais ondulados.
-pub fn textura_madeira() -> ColorImage {
-    let (w, h) = (64usize, 640usize);
-    let escuro = (56.0, 31.0, 17.0);
-    let claro = (126.0, 78.0, 43.0);
-    let mut px = Vec::with_capacity(w * h * 4);
-    for y in 0..h {
-        for x in 0..w {
-            let (xf, yf) = (x as f32, y as f32);
-            let t = xf * 0.33 + 2.6 * (yf * 0.018 + xf * 0.09).sin() + 1.4 * (yf * 0.004).sin();
-            let anel = ((t * 1.7).sin() * 0.5 + 0.5).powf(1.6);
-            let fino = (ruido(x as u32, (y / 3) as u32, 9) - 0.5) * 0.18;
-            let k = (anel * 0.75 + 0.15 + fino).clamp(0.0, 1.0);
-            let c = |a: f32, b: f32| (a + (b - a) * k) as u8;
-            px.extend_from_slice(&[c(escuro.0, claro.0), c(escuro.1, claro.1), c(escuro.2, claro.2), 255]);
-        }
-    }
-    ColorImage::from_rgba_unmultiplied([w, h], &px)
-}
-
 /// Texto gravado no metal: sombra clara 1 px abaixo, tinta escura por cima.
 pub fn gravado(p: &Painter, pos: Pos2, align: Align2, txt: &str, fonte: FontId, cor: Color32) {
     p.text(pos + vec2(0.0, 1.0), align, txt, fonte.clone(), Color32::from_white_alpha(150));
@@ -151,20 +131,58 @@ fn angulo_vu(vu: f32) -> f32 {
     (-50.0 + 100.0 * frac).to_radians()
 }
 
+/// Iluminação do mostrador dos VU.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum TemaVu {
+    /// Verde iluminado (o padrão).
+    #[default]
+    Verde,
+    /// Azul com escala clara, como os receivers McIntosh.
+    Azul,
+    /// Creme com lâmpada âmbar, vintage.
+    Ambar,
+}
+
+impl TemaVu {
+    pub fn nome(self) -> &'static str {
+        match self {
+            TemaVu::Verde => "Verde iluminado",
+            TemaVu::Azul => "Azul (estilo McIntosh)",
+            TemaVu::Ambar => "Âmbar vintage",
+        }
+    }
+
+    /// (paradas do mostrador, tinta da escala, vermelho da zona de pico)
+    fn paleta(self) -> ([(f32, Color32); 3], Color32, Color32) {
+        match self {
+            TemaVu::Verde => (
+                [(0.0, rgb(196, 255, 206)), (0.5, rgb(64, 214, 118)), (1.0, rgb(8, 82, 44))],
+                rgb(8, 34, 18),
+                rgb(196, 22, 14),
+            ),
+            TemaVu::Azul => (
+                [(0.0, rgb(120, 205, 255)), (0.5, rgb(18, 112, 228)), (1.0, rgb(4, 34, 96))],
+                rgb(236, 246, 255),
+                rgb(255, 92, 76),
+            ),
+            TemaVu::Ambar => (
+                [(0.0, rgb(255, 231, 164)), (0.5, rgb(247, 190, 88)), (1.0, rgb(128, 72, 16))],
+                rgb(28, 18, 10),
+                rgb(186, 24, 14),
+            ),
+        }
+    }
+}
+
 /// VU analógico de receiver dos anos 70: mostrador creme iluminado por lâmpada
 /// âmbar, escala -20..+3 e ponteiro. `valor` em VU (0 VU ~ -18 dBFS).
-pub fn vu(p: &Painter, r: Rect, valor: f32, canal: &str) {
+pub fn vu(p: &Painter, r: Rect, valor: f32, canal: &str, tema: TemaVu) {
+    let (paradas, tinta, vermelho) = tema.paleta();
     let k = r.width() / 214.0;
     p.rect_filled(r, Rounding::same(5.0 * k), rgb(9, 9, 10));
     let face = r.shrink(6.0 * k);
     let pc = p.with_clip_rect(face);
-    grad_radial(
-        &pc,
-        face,
-        pos2(face.center().x, face.bottom()),
-        face.width() * 0.85,
-        &[(0.0, rgb(255, 231, 164)), (0.5, rgb(247, 190, 88)), (1.0, rgb(128, 72, 16))],
-    );
+    grad_radial(&pc, face, pos2(face.center().x, face.bottom()), face.width() * 0.85, &paradas);
     let piv = pos2(face.center().x, face.bottom() + 4.0 * k);
     let raio = face.height() * 0.80;
     let ponto = |vu: f32, rr: f32| {
@@ -173,8 +191,6 @@ pub fn vu(p: &Painter, r: Rect, valor: f32, canal: &str) {
     };
     let arco =
         |de: f32, ate: f32, rr: f32| (0..=40).map(|i| ponto(de + (ate - de) * i as f32 / 40.0, rr)).collect::<Vec<_>>();
-    let tinta = rgb(28, 18, 10);
-    let vermelho = rgb(186, 24, 14);
     pc.add(Shape::line(arco(-20.0, 0.0, raio), Stroke::new(1.3 * k, tinta)));
     pc.add(Shape::line(arco(0.0, 3.0, raio), Stroke::new(3.2 * k, vermelho)));
     for vu in [-20.0f32, -10.0, -7.0, -5.0, -3.0, -2.0, -1.0, 0.0, 1.0, 2.0, 3.0] {
@@ -197,7 +213,8 @@ pub fn vu(p: &Painter, r: Rect, valor: f32, canal: &str) {
     let ponta = ponto(valor, raio + 8.0 * k);
     let sombra = vec2(2.0 * k, 2.0 * k);
     pc.line_segment([piv + sombra, ponta + sombra], Stroke::new(1.6 * k, Color32::from_black_alpha(70)));
-    pc.line_segment([piv, ponta], Stroke::new(1.5 * k, rgb(18, 12, 6)));
+    let agulha = if tema == TemaVu::Azul { rgb(250, 250, 250) } else { rgb(18, 12, 6) };
+    pc.line_segment([piv, ponta], Stroke::new(1.5 * k, agulha));
     pc.circle_filled(piv, 9.0 * k, rgb(14, 12, 10));
     // reflexo do vidro: degradê suave, sem borda
     grad_v(

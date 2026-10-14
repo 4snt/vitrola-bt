@@ -44,6 +44,9 @@ pub struct Estado {
     pub aviso: Option<String>,
     /// Trabalhador de áudio atual (só ele atualiza tocando/gravando).
     pub trabalhador_ativo: u64,
+    /// Saída de som padrão do sistema (nome) e o volume dela (0..1, mudo).
+    pub saida_dispositivo: Option<String>,
+    pub saida_volume: Option<(f32, bool)>,
     /// Equalizador e funções de escuta; `som_versao` muda a cada ajuste.
     pub som: crate::dsp::Som,
     pub som_versao: u64,

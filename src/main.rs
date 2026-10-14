@@ -99,7 +99,9 @@ fn main() {
     };
 
     #[cfg(target_os = "linux")]
-    rt.spawn(backend::rodar(c.clone(), rx, prefs.tocar_auto, sem_interface.then_some(true)));
+    // a alavanca BLUETOOTH abre como foi deixada (no terminal, sempre ligada)
+    let ligar = if sem_interface { true } else { prefs.bluetooth_ligado };
+    rt.spawn(backend::rodar(c.clone(), rx, prefs.tocar_auto, Some(ligar)));
     #[cfg(not(target_os = "linux"))]
     {
         c.trava().aviso = Some("Receptor Bluetooth ainda não disponível neste sistema (Linux por enquanto)".into());
@@ -165,8 +167,8 @@ fn main() {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Vitrola BT")
         .with_app_id(APP_ID)
-        .with_inner_size([820.0, 826.0])
-        .with_min_inner_size([560.0, 564.0]);
+        .with_inner_size([860.0, 902.0])
+        .with_min_inner_size([420.0, 360.0]);
     if let Some(i) = icone() {
         viewport = viewport.with_icon(i);
     }
