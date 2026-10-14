@@ -41,7 +41,9 @@ impl Saida {
         let spa =
             format!("{{ {} }}", props.iter().map(|(k, v)| format!("{k} = \"{v}\"")).collect::<Vec<_>>().join(" "));
         let filho = Command::new("pw-cat")
-            .args(["--playback", "--raw", "--format", "s16", "--channels", "2", "--media-role", "Music"])
+            // f32: o PCM depois do EQ e do volume vai em ponto flutuante, sem
+            // voltar para 16 bits (o PipeWire mistura em float de qualquer jeito)
+            .args(["--playback", "--raw", "--format", "f32", "--channels", "2", "--media-role", "Music"])
             .args(["--rate", &cfg.rate.to_string(), "-P", &spa, "-"])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
@@ -54,7 +56,7 @@ impl Saida {
             libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
             libc::fcntl(fd, libc::F_SETPIPE_SZ, CANO_BYTES);
         }
-        let por_ms = cfg.rate as usize * 4 / 1000;
+        let por_ms = cfg.rate as usize * 8 / 1000; // f32 estéreo = 8 bytes por quadro
         Ok(Saida { filho, fila: VecDeque::new(), reserva: RESERVA_MS * por_ms, maximo: 1000 * por_ms, juntando: true })
     }
 

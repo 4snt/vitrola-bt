@@ -200,25 +200,47 @@ impl Processador {
         self.som = som.clone();
     }
 
-    /// PCM s16le estéreo intercalado, no lugar.
+    /// PCM s16le estéreo (entrada) -> f32le estéreo (saída, sem requantizar:
+    /// EQ e volume não jogam bits fora; o PipeWire trabalha em float).
+    pub fn processar_f32(&mut self, pcm: &[u8], saida: &mut Vec<u8>) {
+        saida.clear();
+        saida.reserve(pcm.len() * 2);
+        for q in pcm.chunks_exact(4) {
+            let (l, r) = self.amostra(q);
+            saida.extend_from_slice(&l.to_le_bytes());
+            saida.extend_from_slice(&r.to_le_bytes());
+        }
+    }
+
+    #[inline]
+    fn amostra(&mut self, q: &[u8]) -> (f32, f32) {
+        let mut l = i16::from_le_bytes([q[0], q[1]]) as f32 / 32768.0;
+        let mut r = i16::from_le_bytes([q[2], q[3]]) as f32 / 32768.0;
+        if !self.ativo {
+            return (l, r);
+        }
+        if self.som.mono {
+            let m = (l + r) * 0.5;
+            l = m;
+            r = m;
+        }
+        for (f, e) in self.filtros.iter().zip(self.estados.iter_mut()) {
+            l = e[0].passar(f, l);
+            r = e[1].passar(f, r);
+        }
+        ((l * self.ganho_l).clamp(-1.0, 1.0), (r * self.ganho_r).clamp(-1.0, 1.0))
+    }
+
+    /// Versão 16 bits no lugar (usada nos testes).
+    #[cfg(test)]
     pub fn processar(&mut self, pcm: &mut [u8]) {
         if !self.ativo {
             return;
         }
         for q in pcm.chunks_exact_mut(4) {
-            let mut l = i16::from_le_bytes([q[0], q[1]]) as f32 / 32768.0;
-            let mut r = i16::from_le_bytes([q[2], q[3]]) as f32 / 32768.0;
-            if self.som.mono {
-                let m = (l + r) * 0.5;
-                l = m;
-                r = m;
-            }
-            for (f, e) in self.filtros.iter().zip(self.estados.iter_mut()) {
-                l = e[0].passar(f, l);
-                r = e[1].passar(f, r);
-            }
-            let l = (l * self.ganho_l * 32767.0).clamp(-32768.0, 32767.0) as i16;
-            let r = (r * self.ganho_r * 32767.0).clamp(-32768.0, 32767.0) as i16;
+            let (l, r) = self.amostra(q);
+            let l = (l * 32767.0) as i16;
+            let r = (r * 32767.0) as i16;
             q[..2].copy_from_slice(&l.to_le_bytes());
             q[2..].copy_from_slice(&r.to_le_bytes());
         }

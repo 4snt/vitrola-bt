@@ -51,7 +51,7 @@ pasta="vitrola-bt-$desc-linux-x86_64"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/$pasta"
-cp -r target/release/vitrola-bt bin data config README.md LICENSE "$tmp/$pasta/"
+cp -r target/release/vitrola-bt bin data config README.md LICENSE THIRD_PARTY.md "$tmp/$pasta/"
 mkdir -p "$tmp/$pasta/packaging"
 cp packaging/classe-caixa packaging/io.github._4snt.VitrolaBT.policy packaging/instalar.sh "$tmp/$pasta/packaging/"
 cp packaging/instalar.sh "$tmp/$pasta/instalar.sh"

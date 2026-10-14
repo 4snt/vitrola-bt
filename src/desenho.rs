@@ -137,7 +137,7 @@ pub enum TemaVu {
     /// Verde iluminado (o padrão).
     #[default]
     Verde,
-    /// Azul com escala clara, como os receivers McIntosh.
+    /// Azul com escala clara, como receivers clássicos de alta fidelidade.
     Azul,
     /// Creme com lâmpada âmbar, vintage.
     Ambar,
@@ -147,7 +147,7 @@ impl TemaVu {
     pub fn nome(self) -> &'static str {
         match self {
             TemaVu::Verde => "Verde iluminado",
-            TemaVu::Azul => "Azul (estilo McIntosh)",
+            TemaVu::Azul => "Azul clássico",
             TemaVu::Ambar => "Âmbar vintage",
         }
     }

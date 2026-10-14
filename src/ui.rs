@@ -222,7 +222,7 @@ impl App {
         };
         let entrada = [
             ("APARELHO", ap.map(|a| a.nome.clone()).unwrap_or_else(|| "--".into())),
-            ("ENDEREÇO", ap.map(|a| a.mac.clone()).unwrap_or_else(|| "--".into())),
+            ("ENDEREÇO", ap.map(|a| self.mac_visivel(&a.mac)).unwrap_or_else(|| "--".into())),
             ("CHIP", ap.map(|a| a.chip.clone().unwrap_or_else(|| "lendo...".into())).unwrap_or_else(|| "--".into())),
             ("BLUETOOTH", ap.and_then(|a| a.versao_bt.clone()).unwrap_or_else(|| "--".into())),
             (
@@ -657,11 +657,20 @@ impl App {
 }
 
 impl App {
+    /// Nas fotos de divulgação o MAC aparece mascarado (identifica o aparelho).
+    fn mac_visivel(&self, mac: &str) -> String {
+        if self.captura.is_some() {
+            format!("{}:XX:XX:XX", mac.split(':').take(3).collect::<Vec<_>>().join(":"))
+        } else {
+            mac.to_string()
+        }
+    }
+
     fn capturar(&mut self, ctx: &egui::Context) {
         let Some((caminho, inicio, pedida)) = &mut self.captura else { return };
         if inicio.elapsed() < Duration::from_millis(300) {
-            // janela com a proporção do rack, para a foto mostrar tudo
-            ctx.send_viewport_cmd(ViewportCommand::InnerSize(vec2(LARG * 0.9, ALT * 0.9)));
+            // janela grande, para a foto ter resolução
+            ctx.send_viewport_cmd(ViewportCommand::Maximized(true));
         }
         let atraso = std::env::var("VITROLA_CAPTURA_ATRASO").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(2.5);
         if !*pedida && inicio.elapsed() > Duration::from_secs_f32(atraso) {

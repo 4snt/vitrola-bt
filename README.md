@@ -29,7 +29,7 @@ Pop!_OS 24.04 / COSMIC · PipeWire 1.6 · WirePlumber 0.5 · BlueZ 5.72.
   - **VB-EQ10 (equalizador):** analisador de espectro da **saída** e os 10 cursores.
   - **VB-C70 (tape deck):** fita com carretéis girando, contador e teclas de piano.
   - O rack ocupa toda a largura da janela e rola na vertical quando ela é baixa. Os VU
-    podem ser verdes, azuis (estilo McIntosh) ou âmbar (em AJUSTES).
+    podem ser verdes, azul clássico ou âmbar (em AJUSTES).
 - **HI-FI:** renegocia o SBC dual channel (~396 kbps) na hora; a lâmpada acende quando
   ele está ativo. Sem apertar nada, o app tenta o dual a cada minuto com o link estável.
 - **Equalizador gráfico de 10 bandas** (31 Hz a 16 kHz, ±12 dB) e as funções de um
@@ -166,6 +166,16 @@ ainda é só Linux; no Windows o caminho será a API `AudioPlaybackConnection`.
 - **Conecte pelo botão da vitrola (ou deixe o app reconectar).** O applet de Bluetooth
   do sistema pode conectar o lado "caixa de som" do chip; o app corrige, mas leva alguns segundos.
 
+## Marcas e afiliação
+
+Projeto independente e sem fins comerciais. **Não é afiliado, patrocinado nem endossado**
+pela Polyvox, pela Zhuhai JieLi Technology nem pelo Bluetooth SIG. Polyvox, XTD-67 e
+Bluetooth® são marcas de seus respectivos titulares e aparecem aqui só para indicar com
+qual aparelho e qual tecnologia o software é compatível. O projeto não usa logotipos de
+terceiros, não altera nem acessa o firmware da vitrola e se comunica com ela apenas pelos
+perfis Bluetooth padronizados (A2DP/AVDTP), por meio do BlueZ. Os nomes de modelo do rack
+(VB-DAC1, VB-7000, VB-EQ10, VB-C70) são fictícios.
+
 ## Licença
 
-MIT. Veja [LICENSE](LICENSE).
+MIT. Veja [LICENSE](LICENSE) e as licenças das dependências em [THIRD_PARTY.md](THIRD_PARTY.md).

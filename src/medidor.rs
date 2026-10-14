@@ -80,6 +80,27 @@ impl Medidor {
         saida
     }
 
+    /// Alimenta PCM f32le estéreo (a saída depois do EQ e do volume).
+    pub fn alimentar_f32(&mut self, pcm: &[u8]) -> Option<Medidas> {
+        let mut saida = None;
+        for q in pcm.chunks_exact(8) {
+            let l = f32::from_le_bytes([q[0], q[1], q[2], q[3]]);
+            let r = f32::from_le_bytes([q[4], q[5], q[6], q[7]]);
+            let (li, ri) = ((l * 32768.0) as i32, (r * 32768.0) as i32);
+            self.soma_q[0] += (li as f64) * (li as f64);
+            self.soma_q[1] += (ri as f64) * (ri as f64);
+            self.pico[0] = self.pico[0].max(li.abs());
+            self.pico[1] = self.pico[1].max(ri.abs());
+            self.historico[self.pos] = (l + r) * 0.5;
+            self.pos = (self.pos + 1) % N_FFT;
+            self.contagem += 1;
+            if self.contagem >= self.por_medida {
+                saida = Some(self.medir());
+            }
+        }
+        saida
+    }
+
     fn medir(&mut self) -> Medidas {
         let fs = 32768.0f64 * 32768.0;
         let n = self.contagem.max(1) as f64;

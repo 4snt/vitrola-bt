@@ -187,10 +187,8 @@ fn laco(
             }
         }
         // o EQ só afeta o que se ouve; o REC grava o sinal original
-        escuta.clear();
-        escuta.extend_from_slice(&pcm);
-        dsp.processar(&mut escuta);
-        if let Some(m) = medidor_saida.alimentar(&escuta) {
+        dsp.processar_f32(&pcm, &mut escuta);
+        if let Some(m) = medidor_saida.alimentar_f32(&escuta) {
             c.trava().medidas_saida = m;
         }
         if let Some(s) = saida.as_mut() {

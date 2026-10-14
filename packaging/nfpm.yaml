@@ -50,6 +50,8 @@ contents:
     dst: /usr/share/doc/vitrola-bt/README.md
   - src: LICENSE
     dst: /usr/share/licenses/vitrola-bt/LICENSE
+  - src: THIRD_PARTY.md
+    dst: /usr/share/licenses/vitrola-bt/THIRD_PARTY.md
 
 scripts:
   postinstall: packaging/postinstall.sh
