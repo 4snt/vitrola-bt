@@ -696,8 +696,9 @@ impl App {
 
     fn capturar(&mut self, ctx: &egui::Context) {
         let Some((caminho, inicio, pedida)) = &mut self.captura else { return };
-        if inicio.elapsed() < Duration::from_millis(300) {
-            // janela grande, para a foto ter resolução
+        if !*pedida && inicio.elapsed() < Duration::from_millis(300) {
+            // janela grande, para a foto ter resolução (só até pedir a foto:
+            // depois a janela volta a ser do usuário)
             ctx.send_viewport_cmd(ViewportCommand::Maximized(true));
         }
         let atraso = std::env::var("VITROLA_CAPTURA_ATRASO").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(2.5);
@@ -728,7 +729,6 @@ impl App {
                 Err(e) => eprintln!("captura falhou: {e}"),
             }
             *pedida = true;
-            *inicio = Instant::now() + Duration::from_secs(3600);
         }
     }
 }
