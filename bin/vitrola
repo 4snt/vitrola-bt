@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+# vitrola — recebe o áudio Bluetooth da Polyvox XTD-67 no Linux (PipeWire + BlueZ)
+# com o melhor codec que a vitrola suportar.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+STATE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/vitrola-bt"
+MAC_FILE="$STATE_DIR/mac"
+REC_DIR="${VITROLA_REC_DIR:-$ROOT/gravacoes}"
+NAME_PATTERN="${VITROLA_NAME:-polyvox|xtd|turntable|vitrola}"
+
+UUID_AUDIO_SOURCE="0000110a"   # dispositivo TRANSMITE áudio (o que queremos)
+UUID_AUDIO_SINK="0000110b"     # dispositivo RECEBE áudio
+
+c_ok()   { printf '\e[32m%s\e[0m\n' "$*"; }
+c_warn() { printf '\e[33m%s\e[0m\n' "$*" >&2; }
+die()    { printf '\e[31merro:\e[0m %s\n' "$*" >&2; exit 1; }
+need()   { command -v "$1" >/dev/null || die "comando '$1' não encontrado (instale: $2)"; }
+
+saved_mac() { [[ -f "$MAC_FILE" ]] && cat "$MAC_FILE"; }
+
+require_mac() {
+  local mac
+  mac="${1:-$(saved_mac || true)}"
+  [[ -n "$mac" ]] || die "vitrola não pareada. Rode: vitrola parear"
+  echo "$mac"
+}
+
+# Nó PipeWire de entrada (bluez_input.*) da vitrola, em JSON
+bt_input_node() {
+  local mac_us="${1//:/_}"
+  pw-dump 2>/dev/null | jq -c --arg m "$mac_us" '
+    [ .[] | select(.type == "PipeWire:Interface:Node")
+          | select((.info.props["node.name"] // "") | test("^bluez_input\\." + $m))
+    ] | first // empty'
+}
+
+cmd_instalar() {
+  need pw-dump pipewire-bin; need jq jq; need bluetoothctl bluez
+  local wp="$HOME/.config/wireplumber/wireplumber.conf.d"
+  local pw="$HOME/.config/pipewire/pipewire.conf.d"
+  mkdir -p "$wp" "$pw"
+  ln -sfn "$ROOT/config/wireplumber/51-vitrola-bt.conf" "$wp/51-vitrola-bt.conf"
+  ln -sfn "$ROOT/config/pipewire/51-vitrola-rates.conf" "$pw/51-vitrola-rates.conf"
+  c_ok "configs linkadas em $wp e $pw"
+  mkdir -p "$HOME/.local/bin"
+  ln -sfn "$ROOT/bin/vitrola" "$HOME/.local/bin/vitrola"
+  c_ok "comando instalado em ~/.local/bin/vitrola"
+  c_warn "Reiniciando PipeWire/WirePlumber (o áudio de chamadas abertas vai piscar)…"
+  systemctl --user restart wireplumber pipewire pipewire-pulse
+  sleep 2
+  c_ok "pronto. Próximo passo: vitrola parear"
+}
+
+cmd_desinstalar() {
+  rm -f "$HOME/.config/wireplumber/wireplumber.conf.d/51-vitrola-bt.conf" \
+        "$HOME/.config/pipewire/pipewire.conf.d/51-vitrola-rates.conf" \
+        "$HOME/.local/bin/vitrola"
+  systemctl --user restart wireplumber pipewire pipewire-pulse
+  c_ok "configs removidas e serviços reiniciados"
+}
+
+cmd_parear() {
+  need bluetoothctl bluez
+  local mac="${1:-}"
+  bluetoothctl power on >/dev/null
+  bluetoothctl pairable on >/dev/null
+  bluetoothctl discoverable on >/dev/null
+
+  if [[ -z "$mac" ]]; then
+    echo "Coloque a vitrola em modo Bluetooth/pareamento (luz piscando). Procurando por 20s…"
+    bluetoothctl --timeout 20 scan on >/dev/null 2>&1 || true
+    mac="$(bluetoothctl devices | grep -iE "$NAME_PATTERN" | awk '{print $2}' | head -n1 || true)"
+    if [[ -z "$mac" ]]; then
+      echo "Não achei pelo nome (/$NAME_PATTERN/). Dispositivos visíveis:"
+      bluetoothctl devices
+      die "rode de novo informando o MAC: vitrola parear AA:BB:CC:DD:EE:FF"
+    fi
+  fi
+
+  echo "Pareando com $mac…"
+  bluetoothctl pair "$mac" || c_warn "pair falhou (pode já estar pareada) — seguindo"
+  bluetoothctl trust "$mac"     # permite a vitrola reconectar sozinha
+  bluetoothctl connect "$mac" || true
+  bluetoothctl discoverable off >/dev/null
+
+  mkdir -p "$STATE_DIR"; echo "$mac" > "$MAC_FILE"
+  c_ok "MAC salvo em $MAC_FILE"
+  cmd_diagnostico "$mac"
+}
+
+cmd_diagnostico() {
+  need bluetoothctl bluez
+  local mac info
+  mac="$(require_mac "${1:-}")"
+  info="$(bluetoothctl info "$mac" 2>/dev/null)" || die "dispositivo $mac desconhecido"
+  echo "== $(grep -m1 'Alias:' <<<"$info" | cut -d: -f2- | xargs) ($mac)"
+  grep -E 'Paired:|Trusted:|Connected:' <<<"$info" | sed 's/^\s*/   /'
+
+  if grep -qi "$UUID_AUDIO_SOURCE" <<<"$info"; then
+    c_ok "✔ A vitrola TRANSMITE áudio (A2DP Source) — dá para captar via Bluetooth."
+  elif grep -qi "$UUID_AUDIO_SINK" <<<"$info"; then
+    c_warn "✘ A vitrola só RECEBE áudio Bluetooth (A2DP Sink): o BT dela é para tocar música"
+    c_warn "  do celular nas caixas dela, não para enviar o disco. Veja 'Plano B' no README"
+    c_warn "  (saída RCA -> interface de áudio USB), que também dá MAIS qualidade."
+  else
+    c_warn "? Perfis de áudio ainda não anunciados — conecte a vitrola e rode de novo."
+  fi
+  echo
+  cmd_status "$mac"
+}
+
+cmd_status() {
+  need pw-dump pipewire-bin; need jq jq
+  local mac node
+  mac="$(require_mac "${1:-}")"
+  node="$(bt_input_node "$mac")"
+  if [[ -z "$node" ]]; then
+    c_warn "Nenhum stream de áudio da vitrola no PipeWire. Ela está conectada e tocando?"
+    return 1
+  fi
+  jq -r '.info.props as $p | (.info.params.Format[0] // .info.params.EnumFormat[0] // {}) as $f |
+    "Nó:      \($p["node.name"]) (id \(.id))",
+     "Codec:   \($p["api.bluez5.codec"] // "?")",
+     "Perfil:  \($p["api.bluez5.profile"] // "?")",
+     "Formato: \(if ($f.format|type) == "object" then $f.format.default else ($f.format // "?") end)  \($f.rate // "?") Hz  \($f.channels // "?") canais"' <<<"$node"
+  case "$(jq -r '.info.props["api.bluez5.codec"] // ""' <<<"$node")" in
+    aptx_hd)  c_ok "Qualidade: excelente (aptX HD, 24 bits)";;
+    aptx|aac) c_ok "Qualidade: muito boa";;
+    sbc_xq)   c_ok "Qualidade: boa (SBC-XQ, bitpool alto)";;
+    sbc)      c_warn "Qualidade: SBC padrão — limitado pela vitrola. Para mais, use o Plano B (cabo).";;
+    *)        c_warn "Perfil não-A2DP (HFP/HSP?) — qualidade de telefone. Rode: vitrola fixar-a2dp";;
+  esac
+}
+
+cmd_fixar_a2dp() {
+  need pactl pulseaudio-utils
+  local mac card prof
+  mac="$(require_mac "${1:-}")"
+  card="bluez_card.${mac//:/_}"
+  prof="$(pactl list cards | awk -v c="$card" '
+      $0 ~ "Name: "c {f=1} f && /^\s+a2dp[^:]*:/ {gsub(/^\s+|:.*/,""); print; exit}')"
+  [[ -n "$prof" ]] || die "nenhum perfil A2DP disponível em $card"
+  pactl set-card-profile "$card" "$prof"
+  c_ok "perfil $prof ativado"
+}
+
+# Ouvir a vitrola pela saída de áudio atual do PC
+cmd_ouvir() {
+  need pw-loopback pipewire-bin
+  local mac name
+  mac="$(require_mac "${1:-}")"
+  name="$(bt_input_node "$mac" | jq -r '.info.props["node.name"] // empty')"
+  [[ -n "$name" ]] || die "vitrola não está transmitindo (rode: vitrola status)"
+  echo "Ouvindo $name — Ctrl+C para parar"
+  exec pw-loopback --capture "$name" \
+    --capture-props='node.description="Vitrola (captura)"' \
+    --playback-props='node.description="Vitrola -> alto-falantes" media.role=Music'
+}
+
+# Gravar o disco em FLAC sem perdas na taxa nativa do stream (sem reamostrar)
+cmd_gravar() {
+  need pw-record pipewire-bin
+  local mac node name rate fmt codec out
+  mac="$(require_mac "${2:-}")"
+  node="$(bt_input_node "$mac")"
+  [[ -n "$node" ]] || die "vitrola não está transmitindo (rode: vitrola status)"
+  name="$(jq -r '.info.props["node.name"]' <<<"$node")"
+  rate="$(jq -r '(.info.params.Format[0] // .info.params.EnumFormat[0] // {}).rate // 48000
+              | if type == "object" then .default else . end' <<<"$node")"
+  codec="$(jq -r '.info.props["api.bluez5.codec"] // ""' <<<"$node")"
+  # aptX HD entrega 24 bits; os demais codecs A2DP, 16 bits
+  [[ "$codec" == aptx_hd ]] && fmt=s24 || fmt=s16
+  mkdir -p "$REC_DIR"
+  out="$REC_DIR/${1:-disco-$(date +%Y%m%d-%H%M%S)}.flac"
+  echo "Gravando $name ($codec, $rate Hz, $fmt) em $out — Ctrl+C para parar"
+  exec pw-record --target "$name" --rate "$rate" --channels 2 --format "$fmt" "$out"
+}
+
+usage() {
+  cat <<EOF
+vitrola — captura Bluetooth da Polyvox XTD-67 (PipeWire/BlueZ)
+
+  vitrola instalar            aplica configs de alta qualidade (SBC-XQ, aptX/HD, sem HFP)
+  vitrola parear [MAC]        procura, pareia, confia e conecta a vitrola
+  vitrola diagnostico [MAC]   diz se a vitrola transmite áudio e mostra o codec
+  vitrola status [MAC]        codec, taxa e qualidade do stream atual
+  vitrola fixar-a2dp [MAC]    força perfil A2DP se caiu em HFP/HSP
+  vitrola ouvir [MAC]         toca a vitrola na saída de som atual do PC
+  vitrola gravar [NOME] [MAC] grava em FLAC (pasta: $REC_DIR)
+  vitrola desinstalar         remove as configs
+
+Variáveis: VITROLA_NAME (regex do nome BT), VITROLA_REC_DIR (pasta de gravações)
+EOF
+}
+
+sub="${1:-}"; shift || true
+case "$sub" in
+  instalar)      cmd_instalar ;;
+  desinstalar)   cmd_desinstalar ;;
+  parear)        cmd_parear "$@" ;;
+  diagnostico)   cmd_diagnostico "$@" ;;
+  status)        cmd_status "$@" ;;
+  fixar-a2dp)    cmd_fixar_a2dp "$@" ;;
+  ouvir)         cmd_ouvir "$@" ;;
+  gravar)        cmd_gravar "$@" ;;
+  ""|-h|--help|ajuda) usage ;;
+  *) usage; exit 1 ;;
+esac
