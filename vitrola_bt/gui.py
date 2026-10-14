@@ -90,12 +90,15 @@ class Bluetooth:
         return achados
 
 
-def stream_bluetooth(pw_dump_json):
-    """Primeiro nó PipeWire bluez_input.* (o áudio vindo da vitrola)."""
+def ler_pw_dump(pw_dump_json):
     try:
-        objs = json.loads(pw_dump_json)
+        return json.loads(pw_dump_json or "[]")
     except ValueError:
-        return None
+        return []
+
+
+def stream_bluetooth(objs):
+    """Primeiro nó PipeWire bluez_input.* (o áudio vindo da vitrola)."""
     for o in objs:
         if o.get("type") != "PipeWire:Interface:Node":
             continue
@@ -107,6 +110,7 @@ def stream_bluetooth(pw_dump_json):
             if isinstance(rate, dict):
                 rate = rate.get("default", 48000)
             return {
+                "id": o["id"],
                 "name": props["node.name"],
                 "descricao": props.get("node.description") or props.get("device.description") or props["node.name"],
                 "mac": props.get("api.bluez5.address", ""),
@@ -115,6 +119,32 @@ def stream_bluetooth(pw_dump_json):
                 "rate": int(rate),
             }
     return None
+
+
+def ligacoes_para_saidas(objs, node_id):
+    """IDs dos links do nó da vitrola até saídas de som (Audio/Sink).
+
+    O nó bluez_input é um Stream/Output/Audio: o WirePlumber o liga sozinho no
+    alto-falante padrão, como faria com um player. "Ouvir" = existir esse link.
+    """
+    sinks = {
+        o["id"] for o in objs
+        if o.get("type") == "PipeWire:Interface:Node"
+        and str(((o.get("info") or {}).get("props") or {}).get("media.class", "")).startswith("Audio/Sink")
+    }
+    return [
+        o["id"] for o in objs
+        if o.get("type") == "PipeWire:Interface:Link"
+        and (o.get("info") or {}).get("output-node-id") == node_id
+        and (o.get("info") or {}).get("input-node-id") in sinks
+    ]
+
+
+def saida_padrao():
+    """node.name do alto-falante padrão (metadado default.audio.sink)."""
+    out = subprocess.run(["pw-metadata", "0", "default.audio.sink"], capture_output=True, text=True).stdout
+    i = out.find('"name":"')
+    return out[i + 8:out.index('"', i + 8)] if i >= 0 else None
 
 
 class Janela(Gtk.ApplicationWindow):
@@ -129,7 +159,8 @@ class Janela(Gtk.ApplicationWindow):
         self.agente = None
         self.alias_original = None
         self.stream = None
-        self.proc_ouvir = None
+        self.links_saida = []
+        self._mudando_ouvir = False
         self.proc_gravar = None
         self.arquivo_gravacao = None
         self.inicio_gravacao = 0.0
@@ -299,16 +330,19 @@ class Janela(Gtk.ApplicationWindow):
             _ok, out, _err = proc.communicate_utf8_finish(res)
         except GLib.Error:
             out = "[]"
-        novo = stream_bluetooth(out or "[]")
+        objs = ler_pw_dump(out)
+        novo = stream_bluetooth(objs)
         antes = self.stream
         self.stream = novo
+        self.links_saida = ligacoes_para_saidas(objs, novo["id"]) if novo else []
         if novo and not antes:
             self.log(f"Áudio chegando de {novo['descricao']} ({novo['codec'] or '?'}, {novo['rate']} Hz)")
-            if self.chk_auto.get_active() and not self.btn_ouvir.get_active():
-                self.btn_ouvir.set_active(True)
+            if self.chk_auto.get_active() and not self.links_saida:
+                self._ligar_saida()
+            elif not self.chk_auto.get_active() and self.links_saida:
+                self._desligar_saida()
         elif antes and not novo:
             self.log("A vitrola parou de transmitir / desconectou")
-            self.btn_ouvir.set_active(False)
             self.btn_gravar.set_active(False)
         self._atualizar()
 
@@ -341,7 +375,13 @@ class Janela(Gtk.ApplicationWindow):
                 self.lbl_vitrola.set_markup("<big>⏳ Aguardando a vitrola…</big>")
                 self.lbl_codec.set_text("Ligue o modo caixa de som acima e procure o PC na vitrola.")
 
-        self.btn_ouvir.set_sensitive(s is not None or self.btn_ouvir.get_active())
+        tocando = bool(s and self.links_saida)
+        if tocando != self.btn_ouvir.get_active():
+            self._mudando_ouvir = True
+            self.btn_ouvir.set_active(tocando)
+            self._mudando_ouvir = False
+        self.btn_ouvir.set_label("■  Parar de ouvir" if tocando else "▶  Ouvir")
+        self.btn_ouvir.set_sensitive(s is not None)
         self.btn_gravar.set_sensitive(s is not None or self.btn_gravar.get_active())
         if self.proc_gravar:
             seg = int(time.time() - self.inicio_gravacao)
@@ -350,21 +390,37 @@ class Janela(Gtk.ApplicationWindow):
     # ---------- ouvir / gravar ----------
 
     def _on_ouvir(self, btn):
-        if btn.get_active() and self.stream and not self.proc_ouvir:
-            self.proc_ouvir = subprocess.Popen([
-                "pw-loopback", "--capture", self.stream["name"],
-                "--capture-props=node.description=\"Vitrola (captura)\"",
-                "--playback-props=node.description=\"Vitrola -> alto-falantes\" media.role=Music",
-            ])
-            btn.set_label("■  Parar de ouvir")
-            self.log("Tocando nos alto-falantes")
-        elif not btn.get_active() and self.proc_ouvir:
-            self._parar(self.proc_ouvir)
-            self.proc_ouvir = None
-            btn.set_label("▶  Ouvir")
-            self.log("Parou de tocar")
-        elif btn.get_active() and not self.stream:
+        if self._mudando_ouvir:
+            return
+        if not self.stream:
+            self._mudando_ouvir = True
             btn.set_active(False)
+            self._mudando_ouvir = False
+        elif btn.get_active():
+            self._ligar_saida()
+        else:
+            self._desligar_saida()
+        self._atualizar()
+
+    def _ligar_saida(self):
+        sink = saida_padrao()
+        if not sink:
+            self.log("Não achei a saída de som padrão")
+            return
+        r = subprocess.run(["pw-link", self.stream["name"], sink], capture_output=True, text=True)
+        if r.returncode == 0 or "File exists" in r.stderr:
+            self.links_saida = self.links_saida or [-1]
+            self.log("Tocando nos alto-falantes")
+        else:
+            self.log(f"Não consegui ligar nos alto-falantes: {r.stderr.strip()}")
+
+    def _desligar_saida(self):
+        # Só desfaz os links até as saídas de som; a gravação (pw-record) segue
+        for link_id in self.links_saida:
+            if link_id >= 0:
+                subprocess.run(["pw-link", "-d", str(link_id)], capture_output=True)
+        self.links_saida = []
+        self.log("Parou de tocar (a vitrola segue conectada)")
 
     def _on_gravar(self, btn):
         if btn.get_active() and self.stream and not self.proc_gravar:
@@ -402,9 +458,8 @@ class Janela(Gtk.ApplicationWindow):
         Gio.AppInfo.launch_default_for_uri(pasta.as_uri(), None)
 
     def _on_fechar(self, *_):
-        for p in (self.proc_gravar, self.proc_ouvir):
-            if p:
-                self._parar(p)
+        if self.proc_gravar:
+            self._parar(self.proc_gravar)
         if self.agente is not None or self.switch.get_active():
             self._desligar_modo()
         return False

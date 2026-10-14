@@ -109,7 +109,7 @@ cmd_parear() {
 # O PC se disfarça de caixa (classe Audio/Video · Loudspeaker), aceita o
 # pareamento sozinho e, quando o áudio chega, toca nos alto-falantes do PC.
 cmd_receber() {
-  need bluetoothctl bluez; need btmgmt bluez; need pw-loopback pipewire-bin; need jq jq
+  need bluetoothctl bluez; need btmgmt bluez; need pw-link pipewire-bin; need jq jq
   local alias="${VITROLA_ALIAS:-Vitrola PC}" class
   rfkill unblock bluetooth 2>/dev/null || true
   bluetoothctl power on >/dev/null
@@ -128,27 +128,23 @@ cmd_receber() {
   c_ok "PC visível como caixa de som \"$alias\" ($(bluetoothctl show | awk '/Class:/ {print $2; exit}'))"
 
   PYTHONPATH="$ROOT" python3 -m vitrola_bt.agente &
-  local agent_pid=$! loop_pid=""
-  trap 'kill $agent_pid $loop_pid 2>/dev/null; bluetoothctl discoverable off >/dev/null; bluetoothctl system-alias "$(hostname)" >/dev/null' EXIT
+  local agent_pid=$!
+  trap 'kill $agent_pid 2>/dev/null; bluetoothctl discoverable off >/dev/null; bluetoothctl system-alias "$(hostname)" >/dev/null' EXIT
 
   echo "Na vitrola: modo Bluetooth/TX e procure por \"$alias\". Ctrl+C para sair."
-  local node name mac
+  local node mac conectada=""
   while :; do
     node="$(pw-dump 2>/dev/null | jq -c '[ .[] | select(.type == "PipeWire:Interface:Node")
               | select((.info.props["node.name"] // "") | startswith("bluez_input.")) ] | first // empty')"
-    if [[ -n "$node" && -z "$loop_pid" ]]; then
-      name="$(jq -r '.info.props["node.name"]' <<<"$node")"
+    if [[ -n "$node" && -z "$conectada" ]]; then
+      conectada=1
       mac="$(jq -r '.info.props["api.bluez5.address"] // empty' <<<"$node")"
       [[ -n "$mac" ]] && { mkdir -p "$STATE_DIR"; echo "$mac" > "$MAC_FILE"; }
       c_ok "Vitrola conectada: $(jq -r '.info.props["node.description"] // .info.props["node.name"]' <<<"$node") ($mac)"
-      if [[ -n "$mac" ]]; then cmd_status "$mac" || true; fi
-      pw-loopback --capture "$name" \
-        --capture-props='node.description="Vitrola (captura)"' \
-        --playback-props='node.description="Vitrola -> alto-falantes" media.role=Music' &
-      loop_pid=$!
-      echo "Tocando nos alto-falantes. Para gravar em paralelo: vitrola gravar lado-a"
-    elif [[ -z "$node" && -n "$loop_pid" ]]; then
-      kill "$loop_pid" 2>/dev/null || true; loop_pid=""
+      if [[ -n "$mac" ]]; then cmd_status "$mac" || true; cmd_ouvir "$mac"; fi
+      echo "Em outro terminal: vitrola parar | vitrola ouvir | vitrola gravar lado-a"
+    elif [[ -z "$node" && -n "$conectada" ]]; then
+      conectada=""
       c_warn "Vitrola desconectou — aguardando reconexão…"
     fi
     sleep 2
@@ -211,17 +207,37 @@ cmd_fixar_a2dp() {
   c_ok "perfil $prof ativado"
 }
 
-# Ouvir a vitrola pela saída de áudio atual do PC
-cmd_ouvir() {
-  need pw-loopback pipewire-bin
-  local mac name
+# O nó bluez_input é um Stream/Output/Audio: o WirePlumber já o liga sozinho no
+# alto-falante padrão, como um player. Ouvir/parar = criar/desfazer esse link.
+default_sink() {
+  pw-metadata 0 default.audio.sink 2>/dev/null | grep -oP '"name":"\K[^"]+' || true
+}
+
+stream_name() {
+  local mac
   mac="$(require_mac "${1:-}")"
-  name="$(bt_input_node "$mac" | jq -r '.info.props["node.name"] // empty')"
+  bt_input_node "$mac" | jq -r '.info.props["node.name"] // empty'
+}
+
+cmd_ouvir() {
+  need pw-link pipewire-bin
+  local name sink
+  name="$(stream_name "${1:-}")"
   [[ -n "$name" ]] || die "vitrola não está transmitindo (rode: vitrola status)"
-  echo "Ouvindo $name — Ctrl+C para parar"
-  exec pw-loopback --capture "$name" \
-    --capture-props='node.description="Vitrola (captura)"' \
-    --playback-props='node.description="Vitrola -> alto-falantes" media.role=Music'
+  sink="$(default_sink)"
+  [[ -n "$sink" ]] || die "saída de som padrão não encontrada"
+  pw-link "$name" "$sink" 2>/dev/null || true
+  c_ok "Tocando em $sink (para parar: vitrola parar)"
+}
+
+cmd_parar() {
+  need pw-link pipewire-bin
+  local name sink
+  name="$(stream_name "${1:-}")"
+  [[ -n "$name" ]] || die "vitrola não está transmitindo"
+  sink="$(default_sink)"
+  pw-link -d "$name" "$sink" 2>/dev/null || true
+  c_ok "Parou de tocar (a vitrola segue conectada; gravações continuam)"
 }
 
 # Gravar o disco em FLAC sem perdas na taxa nativa do stream (sem reamostrar)
@@ -254,6 +270,7 @@ vitrola — captura Bluetooth da Polyvox XTD-67 (PipeWire/BlueZ)
   vitrola status [MAC]        codec, taxa e qualidade do stream atual
   vitrola fixar-a2dp [MAC]    força perfil A2DP se caiu em HFP/HSP
   vitrola ouvir [MAC]         toca a vitrola na saída de som atual do PC
+  vitrola parar [MAC]         para de tocar nos alto-falantes (segue conectada)
   vitrola gravar [NOME] [MAC] grava em FLAC (pasta: $REC_DIR)
   vitrola desinstalar         remove as configs
 
@@ -271,6 +288,7 @@ case "$sub" in
   status)        cmd_status "$@" ;;
   fixar-a2dp)    cmd_fixar_a2dp "$@" ;;
   ouvir)         cmd_ouvir "$@" ;;
+  parar)         cmd_parar "$@" ;;
   gravar)        cmd_gravar "$@" ;;
   ""|-h|--help|ajuda) usage ;;
   *) usage; exit 1 ;;

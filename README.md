@@ -46,6 +46,7 @@ vitrola receber           # PC vira "caixa de som" e a vitrola pareia NELE (reco
 vitrola parear            # alternativa: o PC procura a vitrola; ou: vitrola parear AA:BB:...
 vitrola diagnostico       # confirma se ela TRANSMITE áudio e mostra o codec
 vitrola ouvir             # toca o disco nas caixas/fone do PC
+vitrola parar             # para de tocar (segue conectada; gravação continua)
 vitrola gravar lado-a     # grava em FLAC (lado-a.flac)
 ```
 
