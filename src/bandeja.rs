@@ -18,6 +18,21 @@ const ITEM: &str = "/StatusNotifierItem";
 type PropsMenu = HashMap<String, OwnedValue>;
 type Layout = (u32, (i32, PropsMenu, Vec<OwnedValue>));
 type Dica = (String, Vec<(i32, i32, Vec<u8>)>, String, String);
+type Pixmaps = Vec<(i32, i32, Vec<u8>)>;
+
+/// O ícone embutido (PNG 128 px) em ARGB32 big-endian, como o StatusNotifier
+/// espera: a bandeja mostra o ícone mesmo se o cache de ícones do painel falhar.
+fn icone_pixmap() -> Pixmaps {
+    let png = include_bytes!("../data/vitrola-bt-128.png");
+    let Ok(mut leitor) = png::Decoder::new(&png[..]).read_info() else { return vec![] };
+    let mut buf = vec![0; leitor.output_buffer_size()];
+    let Ok(info) = leitor.next_frame(&mut buf) else { return vec![] };
+    if info.color_type != png::ColorType::Rgba {
+        return vec![];
+    }
+    let argb = buf[..info.buffer_size()].chunks_exact(4).flat_map(|p| [p[3], p[0], p[1], p[2]]).collect();
+    vec![(info.width as i32, info.height as i32, argb)]
+}
 const MENU: &str = "/MenuBar";
 
 fn dica(c: &Compartilhado) -> String {
@@ -59,7 +74,11 @@ impl Item {
     }
     #[zbus(property)]
     fn icon_theme_path(&self) -> &str {
-        ""
+        "/usr/share/icons"
+    }
+    #[zbus(property)]
+    fn icon_pixmap(&self) -> Pixmaps {
+        icone_pixmap()
     }
     #[zbus(property)]
     fn tool_tip(&self) -> Dica {
@@ -127,7 +146,7 @@ impl Menu {
             let e = self.c.trava();
             (e.fluxo.is_some(), e.tocando)
         };
-        let mut v = vec![(1, Some("Abrir Vitrola BT"))];
+        let mut v = vec![(1, Some("Abrir Vitrola BT")), (5, Some("Ajustes"))];
         if tem_audio {
             v.push((2, Some(if tocando { "Parar" } else { "Tocar" })));
         }
@@ -190,6 +209,9 @@ impl Menu {
             }
             4 => {
                 let _ = self.tx_ui.send(EventoUi::Sair);
+            }
+            5 => {
+                let _ = self.tx_ui.send(EventoUi::Ajustes);
             }
             _ => {}
         }

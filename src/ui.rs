@@ -188,10 +188,17 @@ impl App {
         let mut soltou = false;
 
         // fundo e trilhos de rack (no lugar das laterais de madeira)
-        p.rect_filled(area, Rounding::ZERO, rgb(14, 14, 16));
+        p.rect_filled(area, Rounding::ZERO, rgb(12, 12, 13));
+        d::grad_radial(
+            &p,
+            area,
+            area.center(),
+            area.width().max(area.height()) * 0.8,
+            &[(0.0, rgb(30, 30, 32)), (1.0, rgb(8, 8, 9))],
+        );
         for x in [0.0, LARG - 14.0] {
             let trilho = r_(x, 0.0, 14.0, ALT);
-            d::grad_v(&p, trilho, &[(0.0, rgb(70, 70, 74)), (1.0, rgb(42, 42, 46))]);
+            d::grad_v(&p, trilho, &[(0.0, rgb(40, 40, 42)), (1.0, rgb(24, 24, 26))]);
             let mut y = 10.0;
             while y < ALT - 6.0 {
                 p.rect_filled(r_(x + 4.0, y, 6.0, 6.0), Rounding::same(1.0), rgb(12, 12, 14));
@@ -394,12 +401,16 @@ impl App {
             self.enviar(Comando::HiFi);
         }
         d::botao_funcao(&p, r_hifi, "HI-FI", em_dual || resp.is_pointer_button_down_on());
-        for (y, rotulo, alvo) in [(yc + 40.0, "AJUSTES", 0), (yc + 62.0, "REGISTRO", 1)] {
-            let r = r_(556.0, y - 8.0, 70.0, 16.0);
-            let resp =
-                ui.interact(r, ui.id().with(rotulo), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
-            let cor = if resp.hovered() { rgb(150, 30, 20) } else { tinta };
-            d::gravado(&p, pos2(r.left(), r.center().y), Align2::LEFT_CENTER, rotulo, fonte(8.0), cor);
+        // AJUSTES e REGISTRO: botões de verdade (a lâmpada acende com a janela aberta)
+        for (x, rotulo, alvo, dica) in [
+            (548.0, "AJUSTES", 0, "Tocar ao conectar, bandeja, cor dos VU e pasta de gravações"),
+            (610.0, "REGISTRO", 1, "O que o receptor está fazendo (conexão, codec, reconexões)"),
+        ] {
+            let r = r_(x, yc + 24.0, 56.0, 60.0);
+            let resp = ui
+                .interact(r, ui.id().with(rotulo), Sense::click())
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .on_hover_text(dica);
             if resp.clicked() {
                 if alvo == 0 {
                     self.ver_ajustes = !self.ver_ajustes;
@@ -407,10 +418,12 @@ impl App {
                     self.ver_registro = !self.ver_registro;
                 }
             }
+            let aberto = if alvo == 0 { self.ver_ajustes } else { self.ver_registro };
+            d::botao_funcao(&p, r, rotulo, aberto || resp.is_pointer_button_down_on());
         }
         // VOLUME e BALANCE
-        d::gravado(&p, p_(710.0, yc + 4.0), Align2::CENTER_TOP, "VOLUME", fonte(7.5), tinta);
-        let c_vol = p_(710.0, yc + 58.0);
+        d::gravado(&p, p_(726.0, yc + 4.0), Align2::CENTER_TOP, "VOLUME", fonte(7.5), tinta);
+        let c_vol = p_(726.0, yc + 58.0);
         let r_vol = Rect::from_center_size(c_vol, vec2(96.0 * s, 96.0 * s));
         let resp = ui
             .interact(r_vol, ui.id().with("volume"), Sense::click_and_drag())
@@ -582,24 +595,39 @@ impl App {
         }
     }
 
-    /// Frente de um aparelho do rack: alumínio escovado, bisel e parafusos de rack.
+    /// Frente de um aparelho do rack: alumínio escovado sob luz suave de estúdio,
+    /// chanfro fino, sombra difusa e parafusos sextavados.
     fn unidade(&self, p: &egui::Painter, r: Rect, s: f32) {
-        p.rect_filled(r.translate(vec2(0.0, 3.0 * s)), Rounding::same(3.0 * s), Color32::from_black_alpha(140));
+        d::sombra_suave(p, r, 4.0 * s, 9.0 * s, 210);
         p.image(self.aluminio.id(), r, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+        // luz de cima, suave, e um pouco de queda nas bordas
         d::grad_v(
             p,
             r,
-            &[(0.0, Color32::from_white_alpha(48)), (0.45, Color32::TRANSPARENT), (1.0, Color32::from_black_alpha(40))],
+            &[
+                (0.0, Color32::from_white_alpha(22)),
+                (0.35, Color32::TRANSPARENT),
+                (0.85, Color32::from_black_alpha(14)),
+                (1.0, Color32::from_black_alpha(34)),
+            ],
         );
-        p.line_segment([r.left_top(), r.right_top()], egui::Stroke::new(1.5_f32, Color32::from_white_alpha(220)));
-        p.line_segment([r.left_bottom(), r.right_bottom()], egui::Stroke::new(2.0_f32, Color32::from_black_alpha(110)));
+        // chanfro: fio claro em cima, fio escuro embaixo
+        p.line_segment(
+            [r.left_top() + vec2(2.0, 0.6), r.right_top() + vec2(-2.0, 0.6)],
+            egui::Stroke::new(1.0_f32, Color32::from_white_alpha(130)),
+        );
+        p.line_segment(
+            [r.left_bottom() + vec2(2.0, -0.6), r.right_bottom() + vec2(-2.0, -0.6)],
+            egui::Stroke::new(1.0_f32, Color32::from_black_alpha(120)),
+        );
+        p.rect_stroke(r, Rounding::same(4.0 * s), egui::Stroke::new(1.0_f32, Color32::from_black_alpha(140)));
         for (dx, dy) in [
             (10.0, 10.0),
             (r.width() / s - 10.0, 10.0),
             (10.0, r.height() / s - 10.0),
             (r.width() / s - 10.0, r.height() / s - 10.0),
         ] {
-            d::parafuso(p, r.min + vec2(dx * s, dy * s), 3.6 * s);
+            d::parafuso(p, r.min + vec2(dx * s, dy * s), 3.4 * s);
         }
     }
 
@@ -738,6 +766,11 @@ impl eframe::App for App {
         while let Ok(ev) = self.rx_ui.try_recv() {
             match ev {
                 EventoUi::Mostrar => {
+                    ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
+                    ctx.send_viewport_cmd(ViewportCommand::Focus);
+                }
+                EventoUi::Ajustes => {
+                    self.ver_ajustes = true;
                     ctx.send_viewport_cmd(ViewportCommand::Minimized(false));
                     ctx.send_viewport_cmd(ViewportCommand::Focus);
                 }

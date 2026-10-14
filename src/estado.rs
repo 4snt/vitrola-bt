@@ -116,6 +116,8 @@ pub enum Comando {
 #[derive(Debug)]
 pub enum EventoUi {
     Mostrar,
+    /// Abrir a janela de ajustes (menu da bandeja).
+    Ajustes,
     Sair,
 }
 
