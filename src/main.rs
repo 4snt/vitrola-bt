@@ -98,10 +98,12 @@ fn main() {
         }
     };
 
-    #[cfg(target_os = "linux")]
     // a alavanca BLUETOOTH abre como foi deixada (no terminal, sempre ligada)
-    let ligar = if sem_interface { true } else { prefs.bluetooth_ligado };
-    rt.spawn(backend::rodar(c.clone(), rx, prefs.tocar_auto, Some(ligar)));
+    #[cfg(target_os = "linux")]
+    {
+        let ligar = if sem_interface { true } else { prefs.bluetooth_ligado };
+        rt.spawn(backend::rodar(c.clone(), rx, prefs.tocar_auto, Some(ligar)));
+    }
     #[cfg(not(target_os = "linux"))]
     {
         c.trava().aviso = Some("Receptor Bluetooth ainda não disponível neste sistema (Linux por enquanto)".into());
