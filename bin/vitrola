@@ -141,7 +141,7 @@ cmd_receber() {
       mac="$(jq -r '.info.props["api.bluez5.address"] // empty' <<<"$node")"
       [[ -n "$mac" ]] && { mkdir -p "$STATE_DIR"; echo "$mac" > "$MAC_FILE"; }
       c_ok "Vitrola conectada: $(jq -r '.info.props["node.description"] // .info.props["node.name"]' <<<"$node") ($mac)"
-      [[ -n "$mac" ]] && cmd_status "$mac" || true
+      if [[ -n "$mac" ]]; then cmd_status "$mac" || true; fi
       pw-loopback --capture "$name" \
         --capture-props='node.description="Vitrola (captura)"' \
         --playback-props='node.description="Vitrola -> alto-falantes" media.role=Music' &
