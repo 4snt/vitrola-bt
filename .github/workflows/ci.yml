@@ -11,35 +11,37 @@ permissions:
 
 env:
   NFPM_VERSION: v2.41.0
+  CARGO_TERM_COLOR: always
 
 jobs:
-  lint:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Dependências
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends shellcheck desktop-file-utils python3-gi python3-dbus gir1.2-gtk-3.0
-          pipx install ruff
-      - name: shellcheck
-        run: shellcheck bin/vitrola packaging/*.sh
-      - name: ruff
-        run: ruff check vitrola_bt bin/vitrola-gui
-      - name: Importa os módulos
-        run: python3 -c "import vitrola_bt.agente, vitrola_bt.gui"
-      - name: Valida o .desktop
-        run: desktop-file-validate data/*.desktop
-      - name: Ajuda do CLI
-        run: bin/vitrola --help
-
-  pacotes:
-    needs: lint
-    runs-on: ubuntu-24.04
+  rust:
+    # Ubuntu 22.04 (glibc 2.35): o mesmo binário roda do Debian 12 ao Arch
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Dependências
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsbc1 shellcheck desktop-file-utils
+      - name: Formatação
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --release --locked -- -D warnings
+      - name: Testes
+        run: cargo test --release --locked
+      - name: Compila
+        run: cargo build --release --locked
+      - name: Scripts e .desktop
+        run: |
+          shellcheck bin/vitrola packaging/*.sh packaging/classe-caixa
+          desktop-file-validate data/*.desktop
+          python3 -c "import xml.dom.minidom as m; m.parse('packaging/io.github._4snt.VitrolaBT.policy')"
       - name: Instala o nFPM
         run: |
           curl -fsSL -o /tmp/nfpm.deb \
@@ -52,8 +54,22 @@ jobs:
           name: vitrola-bt-pacotes
           path: dist/*
 
+  windows:
+    # Prévia: a interface compila e abre no Windows; o receptor Bluetooth ainda é só Linux
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Compila
+        run: cargo build --release --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vitrola-bt-windows-previa
+          path: target/release/vitrola-bt.exe
+
   instalar:
-    needs: pacotes
+    needs: rust
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -67,12 +83,12 @@ jobs:
         with:
           name: vitrola-bt-pacotes
           path: dist
-      - name: Instala o pacote e confere comandos/arquivos
+      - name: Instala o pacote e confere binário, bibliotecas e arquivos
         run: bash packaging/test-install.sh
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: instalar
+    needs: [instalar, windows]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -84,4 +100,8 @@ jobs:
       - name: Publica a release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" dist/* --repo "${{ github.repository }}" --title "${{ github.ref_name }}" --generate-notes
+          TAG: ${{ github.ref_name }}
+        run: |
+          previa=""
+          case "$TAG" in *-*) previa="--prerelease" ;; esac
+          gh release create "$TAG" dist/* --repo "${{ github.repository }}" --title "$TAG" --generate-notes $previa

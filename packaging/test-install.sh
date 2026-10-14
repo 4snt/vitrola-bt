@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Instala o pacote de dist/ dentro de um contêiner da distro e confere que o
-# vitrola-bt e todas as ferramentas que ele chama ficaram disponíveis.
-# Uso (no contêiner, na raiz do repo): packaging/test-install.sh
+# Vitrola BT, as bibliotecas que ele carrega e as ferramentas que chama ficaram
+# disponíveis. Uso (no contêiner, na raiz do repo): packaging/test-install.sh
 set -euo pipefail
 # shellcheck source=/dev/null
 . /etc/os-release
@@ -21,18 +21,34 @@ case "$ID ${ID_LIKE:-}" in
 esac
 
 falta=0
-for c in vitrola vitrola-gui bluetoothctl btmgmt pw-dump pw-link pw-record pw-metadata jq pkexec rfkill python3; do
-  if command -v "$c" >/dev/null; then echo "ok    $c"; else echo "FALTA $c"; falta=1; fi
+ok() { echo "ok    $1"; }
+nao() { echo "FALTA $1"; falta=1; }
+
+for c in vitrola-bt vitrola bluetoothctl btmgmt pw-cat pw-dump pw-link pw-record pw-metadata jq pkexec rfkill xdg-open; do
+  if command -v "$c" >/dev/null; then ok "$c"; else nao "$c"; fi
 done
-for f in /usr/share/applications/io.github._4snt.VitrolaBT.desktop \
+for f in /usr/lib/vitrola-bt/classe-caixa \
+         /usr/share/polkit-1/actions/io.github._4snt.VitrolaBT.policy \
+         /usr/share/applications/io.github._4snt.VitrolaBT.desktop \
          /usr/share/icons/hicolor/scalable/apps/vitrola-bt.svg \
+         /usr/share/icons/hicolor/256x256/apps/vitrola-bt.png \
          /usr/share/wireplumber/wireplumber.conf.d/51-vitrola-bt.conf \
          /usr/share/pipewire/pipewire.conf.d/51-vitrola-rates.conf; do
-  if [[ -f "$f" ]]; then echo "ok    $f"; else echo "FALTA $f"; falta=1; fi
+  if [[ -e "$f" ]]; then ok "$f"; else nao "$f"; fi
 done
-
-vitrola --help >/dev/null
-# Importa o app inteiro (GTK, D-Bus, agente) como o lançador do menu faria
-python3 -c "import sys; sys.path.insert(0, '/usr/share/vitrola-bt'); import vitrola_bt.gui, vitrola_bt.agente, vitrola_bt.bandeja"
-echo "ok    import vitrola_bt.gui"
+# Bibliotecas carregadas em tempo de execução (dlopen)
+for lib in libsbc.so.1 libEGL.so.1 libGL.so.1 libwayland-client.so.0 libxkbcommon.so.0; do
+  if ldconfig -p 2>/dev/null | grep -q "$lib" || find /usr/lib /usr/lib64 -name "$lib" 2>/dev/null | grep -q .; then
+    ok "$lib"
+  else
+    nao "$lib"
+  fi
+done
+if ldd /usr/bin/vitrola-bt | grep -q "not found"; then
+  ldd /usr/bin/vitrola-bt; nao "dependências do binário"
+else
+  ok "ldd vitrola-bt"
+fi
+vitrola-bt --version
+vitrola --help >/dev/null && ok "vitrola --help"
 exit "$falta"

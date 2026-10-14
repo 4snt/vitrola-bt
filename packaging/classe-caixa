@@ -1,0 +1,18 @@
+#!/bin/sh
+# vitrola-bt: apresenta o adaptador Bluetooth como caixa de som
+# (classe Audio/Video, Loudspeaker) para a vitrola encontrar o PC.
+# Executado como root pelo pkexec (ação io.github._4snt.VitrolaBT.classe-caixa).
+# Argumentos fixos: não aceita nada do chamador.
+#
+# O btmgmt do BlueZ 5.72 executa o comando mas nunca termina quando a entrada
+# não é um terminal; por isso ele roda num pseudo-terminal (script) e com timeout.
+for b in /usr/bin/btmgmt /usr/sbin/btmgmt /bin/btmgmt; do
+  if [ -x "$b" ]; then
+    if command -v script >/dev/null 2>&1; then
+      exec timeout 15 script -qec "$b class 4 20" /dev/null </dev/null >/dev/null 2>&1
+    fi
+    exec timeout 15 "$b" class 4 20 </dev/null >/dev/null 2>&1
+  fi
+done
+echo "btmgmt não encontrado" >&2
+exit 1

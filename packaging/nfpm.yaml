@@ -1,46 +1,44 @@
 # nFPM: um pacote por família de distro a partir do mesmo conteúdo.
-# Gerado por packaging/build.sh (VERSION vem do ambiente).
+# Gerado por packaging/build.sh (VERSION e ARCH vêm do ambiente).
 name: vitrola-bt
-arch: all
+arch: ${ARCH}
 platform: linux
 version: ${VERSION}
-version_schema: none
 maintainer: Murilo Santiago <murilo.escobedo@protonmail.com>
 description: |
-  Recebe o áudio Bluetooth de uma vitrola no Linux.
-  O PC se passa por caixa de som Bluetooth (A2DP Sink), a vitrola pareia nele,
-  o disco toca nos alto-falantes e pode ser gravado em FLAC.
-  App gráfico (GTK) e comando de terminal "vitrola".
+  Ouça e grave sua vitrola Bluetooth no Linux.
+  O PC se passa por caixa de som Bluetooth (A2DP Sink), recebe o SBC com o
+  maior bitrate que o transmissor aceita (dual channel) e mostra tudo num
+  tape deck dos anos 70: VU meters, espectro, fita cassete e gravação FLAC.
 vendor: vitrola-bt
 homepage: https://github.com/4snt/vitrola-bt
 license: MIT
 section: sound
 
 contents:
+  - src: target/release/vitrola-bt
+    dst: /usr/bin/vitrola-bt
+    file_info: {mode: 0755}
   - src: bin/vitrola
-    dst: /usr/share/vitrola-bt/bin/vitrola
+    dst: /usr/share/vitrola-bt/vitrola
     file_info: {mode: 0755}
-  - src: bin/vitrola-gui
-    dst: /usr/share/vitrola-bt/bin/vitrola-gui
-    file_info: {mode: 0755}
-  - src: vitrola_bt/__init__.py
-    dst: /usr/share/vitrola-bt/vitrola_bt/__init__.py
-  - src: vitrola_bt/agente.py
-    dst: /usr/share/vitrola-bt/vitrola_bt/agente.py
-  - src: vitrola_bt/gui.py
-    dst: /usr/share/vitrola-bt/vitrola_bt/gui.py
-  - src: vitrola_bt/bandeja.py
-    dst: /usr/share/vitrola-bt/vitrola_bt/bandeja.py
-  - src: /usr/share/vitrola-bt/bin/vitrola
+  - src: /usr/share/vitrola-bt/vitrola
     dst: /usr/bin/vitrola
     type: symlink
-  - src: /usr/share/vitrola-bt/bin/vitrola-gui
-    dst: /usr/bin/vitrola-gui
-    type: symlink
+  # Disfarce de caixa de som sem senha para o usuário da sessão (polkit)
+  - src: packaging/classe-caixa
+    dst: /usr/lib/vitrola-bt/classe-caixa
+    file_info: {mode: 0755}
+  - src: packaging/io.github._4snt.VitrolaBT.policy
+    dst: /usr/share/polkit-1/actions/io.github._4snt.VitrolaBT.policy
   - src: data/io.github._4snt.VitrolaBT.desktop
     dst: /usr/share/applications/io.github._4snt.VitrolaBT.desktop
   - src: data/vitrola-bt.svg
     dst: /usr/share/icons/hicolor/scalable/apps/vitrola-bt.svg
+  - src: data/vitrola-bt-256.png
+    dst: /usr/share/icons/hicolor/256x256/apps/vitrola-bt.png
+  - src: data/vitrola-bt-128.png
+    dst: /usr/share/icons/hicolor/128x128/apps/vitrola-bt.png
   # Configs de áudio para todos os usuários (drop-ins lidos pelo PipeWire/WirePlumber)
   - src: config/wireplumber/51-vitrola-bt.conf
     dst: /usr/share/wireplumber/wireplumber.conf.d/51-vitrola-bt.conf
@@ -54,7 +52,8 @@ contents:
 scripts:
   postinstall: packaging/postinstall.sh
 
-# Nomes de pacote mudam de distro para distro
+# Nomes de pacote mudam de distro para distro. O binário carrega em tempo de
+# execução: libsbc, EGL/GL, Wayland (ou X11) e xkbcommon.
 overrides:
   deb:
     depends:
@@ -62,34 +61,36 @@ overrides:
       - pipewire
       - pipewire-bin
       - wireplumber
-      - python3
-      - python3-gi
-      - python3-dbus
-      - gir1.2-gtk-3.0
-      - jq
+      - libsbc1
+      - libegl1
+      - libgl1
+      - libwayland-client0
+      - libxkbcommon0
       - pkexec | policykit-1
       - rfkill
+      - xdg-utils
+      - jq
     recommends:
       - pipewire-pulse
-      - pulseaudio-utils
-      - xdg-user-dirs
+      - libx11-6
+      - libxcursor1
+      - libxrandr2
+      - libxi6
   rpm:
     depends:
       - bluez
       - pipewire
       - pipewire-utils
       - wireplumber
-      - python3
-      - python3-gobject
-      - python3-dbus
-      - gtk3
-      - jq
+      - sbc
+      - mesa-libEGL
+      - mesa-libGL
+      - libwayland-client
+      - libxkbcommon
       - polkit
       - util-linux
-    recommends:
-      - pipewire-pulseaudio
-      - pulseaudio-utils
-      - xdg-user-dirs
+      - xdg-utils
+      - jq
   archlinux:
     depends:
       - bluez
@@ -97,13 +98,14 @@ overrides:
       - pipewire
       - pipewire-audio
       - wireplumber
-      - python
-      - python-gobject
-      - python-dbus
-      - gtk3
-      - jq
+      - sbc
+      - libglvnd
+      - wayland
+      - libxkbcommon
       - polkit
       - util-linux
+      - xdg-utils
+      - jq
 
 archlinux:
   packager: Murilo Santiago <murilo.escobedo@protonmail.com>

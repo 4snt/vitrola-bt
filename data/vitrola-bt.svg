@@ -1,15 +1,130 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <rect x="8" y="16" width="112" height="96" rx="14" fill="#8a5a3b"/>
-  <rect x="8" y="16" width="112" height="96" rx="14" fill="none" stroke="#5e3b25" stroke-width="3"/>
-  <circle cx="54" cy="64" r="38" fill="#1c1c1c"/>
-  <circle cx="54" cy="64" r="30" fill="none" stroke="#333" stroke-width="1.5"/>
-  <circle cx="54" cy="64" r="22" fill="none" stroke="#333" stroke-width="1.5"/>
-  <circle cx="54" cy="64" r="12" fill="#e8b04a"/>
-  <circle cx="54" cy="64" r="2.5" fill="#1c1c1c"/>
-  <circle cx="100" cy="30" r="6" fill="#c9c9c9"/>
-  <path d="M100 30 L102 72 L84 86" fill="none" stroke="#d9d9d9" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-  <rect x="78" y="82" width="10" height="7" rx="2" transform="rotate(-38 83 85)" fill="#9a9a9a"/>
-  <g fill="none" stroke="#4aa3ff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M98 96 l10 -8 l-6 -5 v26 l6 -5 l-10 -8"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <filter id="sombra" x="-20%" y="-20%" width="140%" height="160%">
+      <feGaussianBlur stdDeviation="6"/>
+    </filter>
+    <linearGradient id="nogueira" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#3a2213"/>
+      <stop offset="0.45" stop-color="#7a4a28"/>
+      <stop offset="1" stop-color="#4a2c18"/>
+    </linearGradient>
+    <linearGradient id="aluminio" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbfbf8"/>
+      <stop offset="0.55" stop-color="#d4d3ce"/>
+      <stop offset="1" stop-color="#a8a7a2"/>
+    </linearGradient>
+    <pattern id="escovado" width="4" height="3" patternUnits="userSpaceOnUse">
+      <rect width="4" height="1" fill="#ffffff" opacity="0.18"/>
+      <rect y="2" width="4" height="1" fill="#000000" opacity="0.05"/>
+    </pattern>
+    <linearGradient id="moldura" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9e8e4"/>
+      <stop offset="1" stop-color="#7d7c78"/>
+    </linearGradient>
+    <linearGradient id="vidro" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1b1b1b"/>
+      <stop offset="1" stop-color="#050505"/>
+    </linearGradient>
+    <radialGradient id="ambar" cx="0.5" cy="0.95" r="0.85">
+      <stop offset="0" stop-color="#ffe9a6"/>
+      <stop offset="0.55" stop-color="#f6b955"/>
+      <stop offset="1" stop-color="#8a4f12"/>
+    </radialGradient>
+    <radialGradient id="cromo" cx="0.38" cy="0.32" r="0.75">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.45" stop-color="#cfcfcf"/>
+      <stop offset="0.8" stop-color="#7b7b7b"/>
+      <stop offset="1" stop-color="#4a4a4a"/>
+    </radialGradient>
+    <linearGradient id="tecla" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.6" stop-color="#d6d5d0"/>
+      <stop offset="1" stop-color="#a9a8a3"/>
+    </linearGradient>
+    <linearGradient id="teclaAfundada" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b8b7b2"/>
+      <stop offset="1" stop-color="#d2d1cc"/>
+    </linearGradient>
+    <radialGradient id="lampada" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff2c4"/>
+      <stop offset="0.4" stop-color="#ffb43a"/>
+      <stop offset="1" stop-color="#ffb43a" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="vuE"><rect x="56" y="62" width="70" height="52" rx="3"/></clipPath>
+    <clipPath id="vuD"><rect x="134" y="62" width="70" height="52" rx="3"/></clipPath>
+  </defs>
+
+  <!-- sombra no chão -->
+  <ellipse cx="128" cy="222" rx="112" ry="10" fill="#000" opacity="0.45" filter="url(#sombra)"/>
+
+  <!-- laterais de nogueira -->
+  <rect x="8" y="40" width="240" height="176" rx="16" fill="url(#nogueira)"/>
+  <g stroke="#2a170b" stroke-width="1" opacity="0.45" fill="none">
+    <path d="M14 44 C16 90 12 150 15 212"/>
+    <path d="M20 44 C23 100 18 160 21 212"/>
+    <path d="M27 44 C25 110 29 170 26 212"/>
+    <path d="M230 44 C232 90 228 150 231 212"/>
+    <path d="M236 44 C239 100 234 160 237 212"/>
+    <path d="M242 44 C240 110 244 170 241 212"/>
+  </g>
+
+  <!-- frente de alumínio escovado -->
+  <rect x="34" y="40" width="188" height="176" fill="url(#aluminio)"/>
+  <rect x="34" y="40" width="188" height="176" fill="url(#escovado)"/>
+  <rect x="34" y="40" width="188" height="2" fill="#ffffff" opacity="0.8"/>
+  <rect x="34" y="213" width="188" height="3" fill="#000000" opacity="0.25"/>
+
+  <!-- janela de vidro com os VU -->
+  <rect x="44" y="52" width="168" height="72" rx="6" fill="url(#moldura)"/>
+  <rect x="48" y="56" width="160" height="64" rx="4" fill="url(#vidro)"/>
+  <g clip-path="url(#vuE)">
+    <rect x="56" y="62" width="70" height="52" fill="url(#ambar)"/>
+    <path d="M66 104 A30 30 0 0 1 108 90" stroke="#1c120a" stroke-width="1.6" fill="none"/>
+    <path d="M108 90 A30 30 0 0 1 117 104" stroke="#b3150c" stroke-width="3" fill="none"/>
+    <line x1="91" y1="116" x2="104" y2="80" stroke="#140c06" stroke-width="1.8" stroke-linecap="round"/>
+  </g>
+  <g clip-path="url(#vuD)">
+    <rect x="134" y="62" width="70" height="52" fill="url(#ambar)"/>
+    <path d="M144 104 A30 30 0 0 1 186 90" stroke="#1c120a" stroke-width="1.6" fill="none"/>
+    <path d="M186 90 A30 30 0 0 1 195 104" stroke="#b3150c" stroke-width="3" fill="none"/>
+    <line x1="169" y1="116" x2="176" y2="79" stroke="#140c06" stroke-width="1.8" stroke-linecap="round"/>
+  </g>
+  <rect x="48" y="56" width="160" height="26" rx="4" fill="#ffffff" opacity="0.07"/>
+
+  <!-- botão cromado recartilhado -->
+  <circle cx="78" cy="170" r="30" fill="#3c3c3c" opacity="0.35"/>
+  <circle cx="78" cy="168" r="28" fill="#5a5a5a"/>
+  <circle cx="78" cy="168" r="27" fill="none" stroke="#e6e6e6" stroke-width="3" stroke-dasharray="1.6 1.6" opacity="0.8"/>
+  <circle cx="78" cy="168" r="22" fill="url(#cromo)"/>
+  <line x1="78" y1="168" x2="78" y2="150" stroke="#3a3a3a" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- teclas de piano (PLAY afundada) -->
+  <g>
+    <rect x="120" y="152" width="20" height="40" rx="2" fill="#6c6b67"/>
+    <rect x="120" y="148" width="20" height="38" rx="2" fill="url(#tecla)" stroke="#6c6b67" stroke-width="1"/>
+    <circle cx="130" cy="160" r="3.4" fill="#b3261e"/>
+    <rect x="143" y="152" width="20" height="40" rx="2" fill="#6c6b67"/>
+    <rect x="143" y="152" width="20" height="38" rx="2" fill="url(#teclaAfundada)" stroke="#6c6b67" stroke-width="1"/>
+    <path d="M150 159 L158 164 L150 169 Z" fill="#2a2a2a"/>
+    <rect x="166" y="152" width="20" height="40" rx="2" fill="#6c6b67"/>
+    <rect x="166" y="148" width="20" height="38" rx="2" fill="url(#tecla)" stroke="#6c6b67" stroke-width="1"/>
+    <rect x="172.5" y="156.5" width="7" height="7" fill="#2a2a2a"/>
+    <rect x="189" y="152" width="20" height="40" rx="2" fill="#6c6b67"/>
+    <rect x="189" y="148" width="20" height="38" rx="2" fill="url(#tecla)" stroke="#6c6b67" stroke-width="1"/>
+    <path d="M194 163 L199 156 L204 163 Z M194 165 H204 V167 H194 Z" fill="#2a2a2a"/>
+  </g>
+
+  <!-- lâmpada piloto e símbolo Bluetooth gravado -->
+  <circle cx="200" cy="136" r="9" fill="url(#lampada)"/>
+  <circle cx="200" cy="136" r="3" fill="#ffd27a"/>
+  <path d="M120 131 l8 6 -4 3 v-12 l4 3 -8 6" stroke="#3b3b3b" stroke-width="1.6" fill="none" stroke-linejoin="round" stroke-linecap="round"/>
+  <rect x="134" y="134" width="52" height="2" rx="1" fill="#3b3b3b" opacity="0.6"/>
+
+  <!-- parafusos -->
+  <g fill="#9a9a96" stroke="#5c5c58" stroke-width="0.8">
+    <circle cx="42" cy="48" r="3"/>
+    <circle cx="214" cy="48" r="3"/>
+    <circle cx="42" cy="208" r="3"/>
+    <circle cx="214" cy="208" r="3"/>
   </g>
 </svg>

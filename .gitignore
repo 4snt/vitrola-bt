@@ -2,3 +2,4 @@ gravacoes/*
 !gravacoes/.gitkeep
 dist/
 __pycache__/
+target/

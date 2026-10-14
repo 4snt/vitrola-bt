@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Vitrola BT</vendor>
+  <vendor_url>https://github.com/4snt/vitrola-bt</vendor_url>
+  <action id="io.github._4snt.VitrolaBT.classe-caixa">
+    <description>Apresentar o PC como caixa de som Bluetooth</description>
+    <description xml:lang="pt_BR">Apresentar o PC como caixa de som Bluetooth</description>
+    <message>O Vitrola BT precisa mudar a classe Bluetooth do PC para caixa de som</message>
+    <message xml:lang="pt_BR">O Vitrola BT precisa mudar a classe Bluetooth do PC para caixa de som</message>
+    <icon_name>vitrola-bt</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>yes</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/vitrola-bt/classe-caixa</annotate>
+  </action>
+</policyconfig>

@@ -33,17 +33,30 @@ require_mac() {
   echo "$mac"
 }
 
-# Nó PipeWire de entrada (bluez_input.*) da vitrola, em JSON
+# Stream PipeWire da vitrola, em JSON: o do nosso receptor (vitrola_bt.*) ou
+# o do receptor do PipeWire (bluez_input.*), se estiver em uso
 bt_input_node() {
   local mac_us="${1//:/_}"
   pw-dump 2>/dev/null | jq -c --arg m "$mac_us" '
     [ .[] | select(.type == "PipeWire:Interface:Node")
-          | select((.info.props["node.name"] // "") | test("^bluez_input\\." + $m))
+          | select((.info.props["node.name"] // "") | test("^(vitrola_bt|bluez_input)\\." + $m))
     ] | first // empty'
 }
 
+# Binário do app: o instalado (pacote) ou o compilado neste repositório
+binario_app() {
+  if [[ -x "$ROOT/target/release/vitrola-bt" ]]; then
+    echo "$ROOT/target/release/vitrola-bt"
+  elif command -v vitrola-bt >/dev/null; then
+    command -v vitrola-bt
+  fi
+}
+
+# Instalação de desenvolvimento a partir do repositório (para uso normal,
+# prefira o pacote .deb/.rpm/Arch da página de releases)
 cmd_instalar() {
-  need pw-dump pipewire-bin; need jq jq; need bluetoothctl bluez
+  need pw-dump pipewire-bin; need jq jq; need bluetoothctl bluez; need cargo "rustup (https://rustup.rs)"
+  (cd "$ROOT" && cargo build --release --locked) || die "falha ao compilar"
   local wp="$HOME/.config/wireplumber/wireplumber.conf.d"
   local pw="$HOME/.config/pipewire/pipewire.conf.d"
   mkdir -p "$wp" "$pw"
@@ -52,24 +65,25 @@ cmd_instalar() {
   c_ok "configs linkadas em $wp e $pw"
   mkdir -p "$HOME/.local/bin"
   ln -sfn "$ROOT/bin/vitrola" "$HOME/.local/bin/vitrola"
-  ln -sfn "$ROOT/bin/vitrola-gui" "$HOME/.local/bin/vitrola-gui"
-  c_ok "comandos instalados em ~/.local/bin (vitrola, vitrola-gui)"
+  ln -sfn "$ROOT/target/release/vitrola-bt" "$HOME/.local/bin/vitrola-bt"
+  rm -f "$HOME/.local/bin/vitrola-gui"
+  c_ok "comandos instalados em ~/.local/bin (vitrola, vitrola-bt)"
   local apps="$HOME/.local/share/applications" icons="$HOME/.local/share/icons/hicolor/scalable/apps"
   mkdir -p "$apps" "$icons"
-  sed "s|^Exec=.*|Exec=$ROOT/bin/vitrola-gui|" "$ROOT/data/$DESKTOP_ID.desktop" > "$apps/$DESKTOP_ID.desktop"
+  sed "s|^Exec=.*|Exec=$ROOT/target/release/vitrola-bt|" "$ROOT/data/$DESKTOP_ID.desktop" > "$apps/$DESKTOP_ID.desktop"
   ln -sfn "$ROOT/data/vitrola-bt.svg" "$icons/vitrola-bt.svg"
   update-desktop-database "$apps" 2>/dev/null || true
   c_ok "app \"Vitrola BT\" adicionado ao menu de aplicativos"
   c_warn "Reiniciando PipeWire/WirePlumber (o áudio de chamadas abertas vai piscar)…"
   systemctl --user restart wireplumber pipewire pipewire-pulse
   sleep 2
-  c_ok "pronto. Próximo passo: vitrola parear"
+  c_ok "pronto. Abra o Vitrola BT pelo menu (ou: vitrola receber, no terminal)"
 }
 
 cmd_desinstalar() {
   rm -f "$HOME/.config/wireplumber/wireplumber.conf.d/51-vitrola-bt.conf" \
         "$HOME/.config/pipewire/pipewire.conf.d/51-vitrola-rates.conf" \
-        "$HOME/.local/bin/vitrola" "$HOME/.local/bin/vitrola-gui" \
+        "$HOME/.local/bin/vitrola" "$HOME/.local/bin/vitrola-bt" "$HOME/.local/bin/vitrola-gui" \
         "$HOME/.local/share/applications/$DESKTOP_ID.desktop" \
         "$HOME/.local/share/icons/hicolor/scalable/apps/vitrola-bt.svg"
   systemctl --user restart wireplumber pipewire pipewire-pulse
@@ -108,47 +122,13 @@ cmd_parear() {
 # Modo "caixa de som": a vitrola é o TRANSMISSOR e procura um alto-falante.
 # O PC se disfarça de caixa (classe Audio/Video · Loudspeaker), aceita o
 # pareamento sozinho e, quando o áudio chega, toca nos alto-falantes do PC.
+# Receptor sem janela: o mesmo motor do app (dual channel, ~396 kbps), no terminal
 cmd_receber() {
-  need bluetoothctl bluez; need btmgmt bluez; need pw-link pipewire-bin; need jq jq
-  local alias="${VITROLA_ALIAS:-Vitrola PC}" class
-  rfkill unblock bluetooth 2>/dev/null || true
-  bluetoothctl power on >/dev/null
-
-  # Classe 0x04/0x14 = Audio/Video, Loudspeaker. Padrão do PC é Computer/Laptop,
-  # que transmissores de vitrola costumam esconder da lista de busca.
-  class="$(bluetoothctl show | awk '/Class:/ {print $2; exit}')"
-  if (( (class >> 8 & 0x1f) != 0x04 )); then
-    echo "Disfarçando o PC de caixa de som (pede a senha do sudo)…"
-    sudo btmgmt class 4 20 >/dev/null || die "não consegui mudar a classe Bluetooth"
-  fi
-  bluetoothctl system-alias "$alias" >/dev/null
-  bluetoothctl discoverable-timeout 0 >/dev/null
-  bluetoothctl pairable on >/dev/null
-  bluetoothctl discoverable on >/dev/null
-  c_ok "PC visível como caixa de som \"$alias\" ($(bluetoothctl show | awk '/Class:/ {print $2; exit}'))"
-
-  PYTHONPATH="$ROOT" python3 -m vitrola_bt.agente &
-  local agent_pid=$!
-  trap 'kill $agent_pid 2>/dev/null; bluetoothctl discoverable off >/dev/null; bluetoothctl system-alias "$(hostname)" >/dev/null' EXIT
-
-  echo "Na vitrola: modo Bluetooth/TX e procure por \"$alias\". Ctrl+C para sair."
-  local node mac conectada=""
-  while :; do
-    node="$(pw-dump 2>/dev/null | jq -c '[ .[] | select(.type == "PipeWire:Interface:Node")
-              | select((.info.props["node.name"] // "") | startswith("bluez_input.")) ] | first // empty')"
-    if [[ -n "$node" && -z "$conectada" ]]; then
-      conectada=1
-      mac="$(jq -r '.info.props["api.bluez5.address"] // empty' <<<"$node")"
-      [[ -n "$mac" ]] && { mkdir -p "$STATE_DIR"; echo "$mac" > "$MAC_FILE"; }
-      c_ok "Vitrola conectada: $(jq -r '.info.props["node.description"] // .info.props["node.name"]' <<<"$node") ($mac)"
-      if [[ -n "$mac" ]]; then cmd_status "$mac" || true; cmd_ouvir "$mac"; fi
-      echo "Em outro terminal: vitrola parar | vitrola ouvir | vitrola gravar lado-a"
-    elif [[ -z "$node" && -n "$conectada" ]]; then
-      conectada=""
-      c_warn "Vitrola desconectou — aguardando reconexão…"
-    fi
-    sleep 2
-  done
+  local app
+  app="$(binario_app)"
+  [[ -n "$app" ]] || die "vitrola-bt não encontrado: instale o pacote ou rode 'vitrola instalar'"
+  echo "Na vitrola: ligue o Bluetooth e escolha \"${VITROLA_ALIAS:-Vitrola PC}\". Ctrl+C para sair."
+  exec "$app" --sem-interface
 }
 
 cmd_diagnostico() {
@@ -267,7 +247,7 @@ usage() {
 vitrola — captura Bluetooth da Polyvox XTD-67 (PipeWire/BlueZ)
 
   vitrola instalar            aplica configs de alta qualidade (SBC-XQ, aptX/HD, sem HFP)
-  vitrola receber             PC vira "caixa de som": a vitrola pareia e toca nele
+  vitrola receber             receptor no terminal (o app sem janela): a vitrola pareia e toca
   vitrola parear [MAC]        procura, pareia, confia e conecta a vitrola
   vitrola diagnostico [MAC]   diz se a vitrola transmite áudio e mostra o codec
   vitrola status [MAC]        codec, taxa e qualidade do stream atual
