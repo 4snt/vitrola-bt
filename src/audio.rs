@@ -50,7 +50,7 @@ impl Drop for Trabalhador {
 
 /// Sem pacote nenhum por este tempo = fluxo travado (com o disco parado a
 /// vitrola ainda manda quadros de silêncio).
-const SEM_DADOS: Duration = Duration::from_secs(3);
+const SEM_DADOS: Duration = Duration::from_secs(15);
 
 /// `sem_dados`: chamado (uma vez por travada) quando a vitrola para de mandar pacotes.
 pub fn iniciar(

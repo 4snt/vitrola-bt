@@ -27,8 +27,6 @@ const TENTATIVAS: usize = 3;
 const JANELA: Duration = Duration::from_secs(120);
 /// Tempo tocando sem travar antes de tentar o upgrade para dual channel.
 const ESTAVEL: Duration = Duration::from_secs(20);
-/// Depois que o dual trava, fica em joint stereo por este tempo.
-const BLOQUEIO_DUAL: Duration = Duration::from_secs(2 * 60);
 /// Em joint stereo, de quanto em quanto tempo tenta de novo o dual channel.
 const INTERVALO_UPGRADE: Duration = Duration::from_secs(60);
 
@@ -53,8 +51,6 @@ pub struct Receptor {
     /// reconfigurar, reanimar) por vez. Quem chega com outra em andamento desiste
     /// e tenta no próximo ciclo; nada é enfileirado.
     pub guarda: Arc<tokio::sync::Mutex<()>>,
-    /// O dual channel travou: fica em joint stereo até este instante.
-    dual_bloqueado_ate: Mutex<Option<Instant>>,
 }
 
 struct Endpoint {
@@ -72,7 +68,7 @@ impl Endpoint {
     }
 
     fn select_configuration(&self, capabilities: Vec<u8>) -> fdo::Result<Vec<u8>> {
-        let cfg = sbc::escolher(&capabilities, self.r.dual_permitido())
+        let cfg = sbc::escolher(&capabilities, true)
             .ok_or_else(|| fdo::Error::InvalidArgs("capacidades SBC sem opção em comum".into()))?;
         if let Some(d) = sbc::descrever(&cfg) {
             self.r.c.log(format!("PC escolheu: SBC {}, bitpool {}, {} kbps", d.modo.nome(), d.bitpool, d.kbps));
@@ -108,7 +104,6 @@ impl Receptor {
             tentativas: Mutex::new(HashMap::new()),
             travadas: Mutex::new(HashMap::new()),
             guarda: Arc::default(),
-            dual_bloqueado_ate: Mutex::new(None),
         });
         conn.object_server().at(CAMINHO, Endpoint { r: r.clone() }).await?;
         let props: HashMap<&str, Value> = HashMap::from([
@@ -206,7 +201,7 @@ impl Receptor {
                 iniciando: false,
             },
         );
-        if cfg.modo != Modo::Dual && self.dual_permitido() {
+        if cfg.modo != Modo::Dual {
             // Toca já no modo da vitrola; o dual é um upgrade só com o link estável
             let (r, t) = (self.clone(), transporte.to_string());
             tokio::spawn(async move { r.upgrade_quando_estavel(t, dispositivo).await });
@@ -357,11 +352,7 @@ impl Receptor {
         }
         self.travadas.lock().unwrap().remove(&dispositivo);
         if em_dual {
-            *self.dual_bloqueado_ate.lock().unwrap() = Some(Instant::now() + BLOQUEIO_DUAL);
-            self.c.log(format!(
-                "O dual channel falhou 3 vezes em 1 min: usando joint stereo por {} min",
-                BLOQUEIO_DUAL.as_secs() / 60
-            ));
+            self.c.log("O fluxo dual ficou sem pacotes; reabrindo A2DP sem desabilitar o dual channel");
         } else {
             self.c.log("O fluxo travou de novo: reabrindo a conexão de áudio");
         }
@@ -377,10 +368,6 @@ impl Receptor {
         self.abrir_a2dp(dispositivo).await;
     }
 
-    fn dual_permitido(&self) -> bool {
-        self.dual_bloqueado_ate.lock().unwrap().is_none_or(|t| Instant::now() >= t)
-    }
-
     /// Upgrade para dual channel só depois de ESTAVEL sem travar no modo atual.
     /// Sempre busca a melhor qualidade: enquanto este fluxo em joint stereo existir,
     /// tenta o dual channel com o link estável (a primeira vez após ESTAVEL, depois
@@ -394,13 +381,7 @@ impl Receptor {
             else {
                 return; // fluxo substituído (upgrade feito ou reconexão)
             };
-            let travou = self
-                .travadas
-                .lock()
-                .unwrap()
-                .get(&dispositivo)
-                .is_some_and(|v| v.last().is_some_and(|t| t.elapsed() < ESTAVEL));
-            if !tocando_aqui || travou || !self.dual_permitido() || !self.pode_tentar(&dispositivo) {
+            if !tocando_aqui || !self.pode_tentar(&dispositivo) {
                 continue;
             }
             self.c.log("Link estável: tentando o upgrade para dual channel");
@@ -411,7 +392,6 @@ impl Receptor {
     /// Botão HI-FI: reinicia o perfil A2DP para renegociar a melhor configuração
     /// que este receptor suporta (SBC dual channel, até o bitpool anunciado).
     pub async fn hifi(self: &Arc<Self>) {
-        *self.dual_bloqueado_ate.lock().unwrap() = None;
         let Ok(objs) = bluez::objetos(&self.conn).await else { return };
         let Some(d) = bluez::fontes_conectadas(&objs).into_iter().next() else {
             return self.c.log("HI-FI: nenhuma vitrola conectada");
@@ -596,9 +576,6 @@ impl Receptor {
     async fn forcar_dual(self: &Arc<Self>, dispositivo: &str) {
         // espera a vez (ex.: a reconexão do PC ainda segurando o guardião)
         let Ok(_guarda) = tokio::time::timeout(Duration::from_secs(10), self.guarda.lock()).await else { return };
-        if !self.dual_permitido() {
-            return;
-        }
         self.reconfigurar_dual(dispositivo).await;
     }
 
