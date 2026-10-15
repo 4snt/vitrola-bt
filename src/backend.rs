@@ -180,9 +180,9 @@ impl Backend {
                 Some(r) => r.alternar_gravacao(),
                 None => self.c.log("REC: ligue o BLUETOOTH primeiro"),
             },
-            Comando::HiFi => match self.receptor.clone() {
+            Comando::HiFi(ligado) => match self.receptor.clone() {
                 Some(r) => {
-                    tokio::spawn(async move { r.hifi().await });
+                    tokio::spawn(async move { r.definir_hifi(ligado).await });
                 }
                 None => self.c.log("HI-FI: ligue o BLUETOOTH primeiro"),
             },

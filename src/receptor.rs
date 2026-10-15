@@ -42,6 +42,7 @@ struct Fluxo {
 pub struct Receptor {
     conn: Connection,
     c: Compartilhado,
+    hifi_ligado: AtomicBool,
     tocar_auto: AtomicBool,
     tocar: AtomicBool,
     fluxos: Mutex<HashMap<String, Fluxo>>,
@@ -68,7 +69,7 @@ impl Endpoint {
     }
 
     fn select_configuration(&self, capabilities: Vec<u8>) -> fdo::Result<Vec<u8>> {
-        let cfg = sbc::escolher(&capabilities, true)
+        let cfg = sbc::escolher(&capabilities, self.r.hifi_ligado.load(Ordering::SeqCst))
             .ok_or_else(|| fdo::Error::InvalidArgs("capacidades SBC sem opção em comum".into()))?;
         if let Some(d) = sbc::descrever(&cfg) {
             self.r.c.log(format!("PC escolheu: SBC {}, bitpool {}, {} kbps", d.modo.nome(), d.bitpool, d.kbps));
@@ -98,6 +99,7 @@ impl Receptor {
         let r = Arc::new(Receptor {
             conn: conn.clone(),
             c: c.clone(),
+            hifi_ligado: AtomicBool::new(true),
             tocar_auto: AtomicBool::new(tocar_auto),
             tocar: AtomicBool::new(tocar_auto),
             fluxos: Mutex::new(HashMap::new()),
@@ -105,6 +107,7 @@ impl Receptor {
             travadas: Mutex::new(HashMap::new()),
             guarda: Arc::default(),
         });
+        c.trava().hifi_ligado = true;
         conn.object_server().at(CAMINHO, Endpoint { r: r.clone() }).await?;
         let props: HashMap<&str, Value> = HashMap::from([
             ("UUID", Value::from(UUID_A2DP_SINK)),
@@ -384,36 +387,47 @@ impl Receptor {
             if !tocando_aqui || !self.pode_tentar(&dispositivo) {
                 continue;
             }
+            if !self.hifi_ligado.load(Ordering::SeqCst) {
+                continue;
+            }
             self.c.log("Link estável: tentando o upgrade para dual channel");
             self.forcar_dual(&dispositivo).await;
         }
     }
 
-    /// Botão HI-FI: reinicia o perfil A2DP para renegociar a melhor configuração
-    /// que este receptor suporta (SBC dual channel, até o bitpool anunciado).
-    pub async fn hifi(self: &Arc<Self>) {
+    /// Ativa/desativa o modo HI-FI e reconecta para aplicar a preferência.
+    pub async fn definir_hifi(self: &Arc<Self>, ligado: bool) {
+        self.hifi_ligado.store(ligado, Ordering::SeqCst);
+        self.c.trava().hifi_ligado = ligado;
+        if !ligado {
+            self.c.log("HI-FI desligado: voltando à negociação SBC padrão");
+        }
         let Ok(objs) = bluez::objetos(&self.conn).await else { return };
         let Some(d) = bluez::fontes_conectadas(&objs).into_iter().next() else {
-            return self.c.log("HI-FI: nenhuma vitrola conectada");
+            return self.c.log("HI-FI: nenhuma vitrola conectada; preferência salva");
         };
         let em_dual = self.fluxos.lock().unwrap().values().any(|f| f.cfg.modo == Modo::Dual && f.trabalhador.is_some());
-        if em_dual {
+        if ligado && em_dual {
             return self.c.log("HI-FI: já em dual channel (~396 kbps)");
         }
         self.tentativas.lock().unwrap().remove(&d.caminho);
         self.travadas.lock().unwrap().remove(&d.caminho);
-        self.c.log("HI-FI: reconectando o dispositivo para renegociar SBC dual channel");
+        self.c.log(if ligado {
+            "HI-FI ligado: reconectando para renegociar SBC dual channel"
+        } else {
+            "HI-FI desligado: reconectando para negociar SBC padrão"
+        });
         let Ok(_guarda) = tokio::time::timeout(Duration::from_secs(15), self.guarda.lock()).await else {
             return self.c.log("HI-FI: conexão ocupada; tente novamente em alguns segundos");
         };
         self.tentativas.lock().unwrap().remove(&d.caminho);
         self.travadas.lock().unwrap().remove(&d.caminho);
-        self.reconectar_completo_hifi(&d.caminho).await;
+        self.reconectar_completo_hifi(&d.caminho, ligado).await;
     }
 
     /// Equivale à ação do menu do sistema: derruba a conexão inteira do dispositivo,
     /// espera o BlueZ confirmar a queda e reconecta o A2DP no sentido receptor.
-    async fn reconectar_completo_hifi(self: &Arc<Self>, dispositivo: &str) {
+    async fn reconectar_completo_hifi(self: &Arc<Self>, dispositivo: &str, hifi: bool) {
         match bluez::chamar(&self.conn, dispositivo, "org.bluez.Device1", "Disconnect", &()).await {
             Ok(_) => self.c.log("HI-FI: desconexão completa solicitada"),
             Err(e) => self.c.log(format!("HI-FI: erro ao desconectar: {}", bluez::nome_erro(&e))),
@@ -446,7 +460,7 @@ impl Receptor {
         self.c.log("HI-FI: dispositivo reconectado; aguardando endpoint SBC");
 
         // Em alguns transmissores o SEP só reaparece depois da reconexão AVDTP.
-        // Aguarda esse endpoint e repete a solicitação se o primeiro pedido for cedo.
+        // Aguarda o endpoint SBC voltar depois da reconexão AVDTP.
         for tentativa in 0..6 {
             let objs = match bluez::objetos(&self.conn).await {
                 Ok(objs) => objs,
@@ -456,7 +470,11 @@ impl Receptor {
                 }
             };
             if !bluez::seps_sbc(&objs, dispositivo).is_empty() {
-                self.reconfigurar_dual(dispositivo).await;
+                if hifi {
+                    self.reconfigurar_dual(dispositivo).await;
+                } else {
+                    self.c.log("HI-FI desligado: o BlueZ vai selecionar a configuração SBC padrão");
+                }
                 return;
             }
             if tentativa < 5 {
@@ -640,6 +658,9 @@ impl Receptor {
     }
 
     async fn forcar_dual(self: &Arc<Self>, dispositivo: &str) {
+        if !self.hifi_ligado.load(Ordering::SeqCst) {
+            return;
+        }
         // espera a vez (ex.: a reconexão do PC ainda segurando o guardião)
         let Ok(_guarda) = tokio::time::timeout(Duration::from_secs(10), self.guarda.lock()).await else { return };
         self.reconfigurar_dual(dispositivo).await;

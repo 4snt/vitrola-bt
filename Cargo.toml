@@ -1,6 +1,6 @@
 [package]
 name = "vitrola-bt"
-version = "0.3.4"
+version = "0.3.5"
 edition = "2021"
 description = "Ouça e grave sua vitrola Bluetooth no Linux: o PC vira caixa de som (A2DP Sink)"
 license = "MIT"

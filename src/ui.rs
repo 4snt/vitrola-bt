@@ -29,6 +29,7 @@ struct Visao {
     aviso: Option<String>,
     bt_disponivel: bool,
     receptor_ligado: bool,
+    hifi_ligado: bool,
     visivel: bool,
     disfarce: bool,
     alias: String,
@@ -115,6 +116,7 @@ impl App {
             aviso: e.aviso.clone(),
             bt_disponivel: e.bt_disponivel,
             receptor_ligado: e.receptor_ligado,
+            hifi_ligado: e.hifi_ligado,
             visivel: e.visivel,
             disfarce: e.disfarce_caixa,
             alias: e.alias.clone(),
@@ -396,11 +398,11 @@ impl App {
         let resp = ui
             .interact(r_hifi, ui.id().with("hifi"), Sense::click())
             .on_hover_cursor(egui::CursorIcon::PointingHand)
-            .on_hover_text("Renegocia o SBC dual channel (~396 kbps). A lâmpada acende quando ele está ativo.");
+            .on_hover_text("Liga/desliga SBC dual channel (~396 kbps). Ao desligar, reconecta em qualidade padrão.");
         if resp.clicked() {
-            self.enviar(Comando::HiFi);
+            self.enviar(Comando::HiFi(!v.hifi_ligado));
         }
-        d::botao_funcao(&p, r_hifi, "HI-FI", em_dual || resp.is_pointer_button_down_on());
+        d::botao_funcao(&p, r_hifi, "HI-FI", v.hifi_ligado || resp.is_pointer_button_down_on());
         // AJUSTES e REGISTRO: botões de verdade (a lâmpada acende com a janela aberta)
         for (x, rotulo, alvo, dica) in [
             (548.0, "AJUSTES", 0, "Tocar ao conectar, bandeja, cor dos VU e pasta de gravações"),

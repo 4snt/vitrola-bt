@@ -30,6 +30,8 @@ pub struct Estado {
     pub alias: String,
     /// Interruptor BLUETOOTH do deck: receptor no ar.
     pub receptor_ligado: bool,
+    /// Preferência HI-FI: permite/solicita SBC dual channel.
+    pub hifi_ligado: bool,
     pub aparelho: Option<Aparelho>,
     pub fluxo: Option<sbc::Config>,
     pub tocando: bool,
@@ -104,8 +106,8 @@ pub enum Comando {
     Play,
     Stop,
     Rec,
-    /// Botão HI-FI: renegociar dual channel agora.
-    HiFi,
+    /// Botão HI-FI: ativa ou desativa dual channel.
+    HiFi(bool),
     /// Preferência "tocar ao conectar" mudou.
     TocarAuto(bool),
     /// Encerra tudo (grava o FLAC, solta a vitrola) e avisa pelo canal.
