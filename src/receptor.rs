@@ -3,8 +3,8 @@
 //! trabalhador de áudio.
 //!
 //! O chip da vitrola (JieLi) pode ignorar as capacidades que anunciamos quando é
-//! ele quem configura. O PC reabre o perfil A2DP para iniciar uma nova negociação
-//! e escolhe SBC dual channel no SelectConfiguration do endpoint local.
+//! ele quem configura. O PC pede a reconfiguração do SEP remoto para SBC dual
+//! channel, com o maior bitpool comum.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -334,15 +334,6 @@ impl Receptor {
         };
         let dispositivo = transporte.split("/sep").next().unwrap_or(transporte);
         let dispositivo = dispositivo.rsplit_once("/fd").map(|(d, _)| d).unwrap_or(dispositivo).to_string();
-        if em_dual {
-            // O dual travou: volta já para joint stereo, sem insistir
-            *self.dual_bloqueado_ate.lock().unwrap() = Some(Instant::now() + BLOQUEIO_DUAL);
-            self.c.log(format!(
-                "O dual channel travou: voltando para joint stereo (sem dual por {} min)",
-                BLOQUEIO_DUAL.as_secs() / 60
-            ));
-            return self.reabrir_a2dp(&dispositivo).await;
-        }
         let agora = Instant::now();
         let n = {
             let mut t = self.travadas.lock().unwrap();
@@ -352,7 +343,11 @@ impl Receptor {
             v.len()
         };
         if n < 3 {
-            self.c.log("A vitrola parou de mandar áudio: pedindo o fluxo de novo");
+            self.c.log(if em_dual {
+                "O fluxo dual pausou: retomando sem baixar a qualidade"
+            } else {
+                "A vitrola parou de mandar áudio: pedindo o fluxo de novo"
+            });
             let tocar = self.tocar.load(Ordering::SeqCst);
             self.parar_trabalhador(transporte).await;
             tokio::time::sleep(Duration::from_millis(500)).await;
@@ -360,8 +355,16 @@ impl Receptor {
             self.iniciar_fluxo(transporte).await;
             return;
         }
-        self.c.log("O fluxo travou de novo: reabrindo a conexão de áudio");
         self.travadas.lock().unwrap().remove(&dispositivo);
+        if em_dual {
+            *self.dual_bloqueado_ate.lock().unwrap() = Some(Instant::now() + BLOQUEIO_DUAL);
+            self.c.log(format!(
+                "O dual channel falhou 3 vezes em 1 min: usando joint stereo por {} min",
+                BLOQUEIO_DUAL.as_secs() / 60
+            ));
+        } else {
+            self.c.log("O fluxo travou de novo: reabrindo a conexão de áudio");
+        }
         self.reabrir_a2dp(&dispositivo).await;
     }
 
@@ -599,9 +602,24 @@ impl Receptor {
         self.reconfigurar_dual(dispositivo).await;
     }
 
-    /// Reinicia o perfil A2DP. Na negociação seguinte, SelectConfiguration
-    /// escolhe a melhor configuração SBC comum entre receptor e transmissor.
+    /// Pede ao SEP remoto a melhor configuração dual channel comum.
     async fn reconfigurar_dual(self: &Arc<Self>, dispositivo: &str) {
-        self.reabrir_a2dp(dispositivo).await;
+        let Ok(objs) = bluez::objetos(&self.conn).await else { return };
+        let Some((sep, caps)) = bluez::seps_sbc(&objs, dispositivo).into_iter().next() else {
+            return self.c.log("Endpoint SBC do transmissor não encontrado");
+        };
+        let Some(cfg) = sbc::escolher(&caps, true) else { return };
+        let Some(d) = sbc::descrever(&cfg) else { return };
+        if d.modo != Modo::Dual {
+            return self.c.log("O transmissor não anuncia dual channel; mantendo a configuração dele");
+        }
+        self.c.log(format!("Pedindo reconfiguração: SBC {}, bitpool {}, {} kbps", d.modo.nome(), d.bitpool, d.kbps));
+        let Ok(caminho) = ObjectPath::try_from(CAMINHO) else { return };
+        let props: HashMap<&str, Value> = HashMap::from([("Capabilities", Value::from(cfg.to_vec()))]);
+        match bluez::chamar(&self.conn, &sep, "org.bluez.MediaEndpoint1", "SetConfiguration", &(&caminho, props)).await
+        {
+            Ok(_) => self.c.log("Reconfiguração aceita pelo transmissor"),
+            Err(e) => self.c.log(format!("O transmissor recusou a reconfiguração: {}", bluez::nome_erro(&e))),
+        }
     }
 }
