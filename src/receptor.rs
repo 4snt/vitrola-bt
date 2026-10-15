@@ -2,9 +2,9 @@
 //! maior bitrate que o transmissor aceita (dual channel) e entrega o áudio ao
 //! trabalhador de áudio.
 //!
-//! O chip da vitrola (JieLi) ignora as capacidades que anunciamos quando é ele
-//! quem configura (escolhe joint stereo, ~219 kbps). Então o PC abre o A2DP ou
-//! pede a reconfiguração ao endpoint dele, e aí escolhemos dual channel (~396 kbps).
+//! O chip da vitrola (JieLi) pode ignorar as capacidades que anunciamos quando é
+//! ele quem configura. O PC reabre o perfil A2DP para iniciar uma nova negociação
+//! e escolhe SBC dual channel no SelectConfiguration do endpoint local.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -405,7 +405,8 @@ impl Receptor {
         }
     }
 
-    /// Botão HI-FI: renegocia o dual channel agora, ignorando bloqueio e limites.
+    /// Botão HI-FI: reinicia o perfil A2DP para renegociar a melhor configuração
+    /// que este receptor suporta (SBC dual channel, até o bitpool anunciado).
     pub async fn hifi(self: &Arc<Self>) {
         *self.dual_bloqueado_ate.lock().unwrap() = None;
         let Ok(objs) = bluez::objetos(&self.conn).await else { return };
@@ -418,11 +419,16 @@ impl Receptor {
         }
         self.tentativas.lock().unwrap().remove(&d.caminho);
         self.travadas.lock().unwrap().remove(&d.caminho);
-        self.c.log("HI-FI: renegociando dual channel");
+        self.c.log("HI-FI: aguardando para renegociar SBC dual channel");
+        let Ok(_guarda) = tokio::time::timeout(Duration::from_secs(15), self.guarda.lock()).await else {
+            return self.c.log("HI-FI: conexão ocupada; tente novamente em alguns segundos");
+        };
+        self.tentativas.lock().unwrap().remove(&d.caminho);
+        self.travadas.lock().unwrap().remove(&d.caminho);
         if self.tem_fluxo_de(&d.caminho) {
-            self.forcar_dual(&d.caminho).await;
+            self.reabrir_a2dp(&d.caminho).await;
         } else {
-            self.conectar_audio(&d.caminho).await;
+            self.abrir_a2dp(&d.caminho).await;
         }
     }
 
@@ -576,9 +582,8 @@ impl Receptor {
         if let Err(e) = r {
             let nome = bluez::nome_erro(&e);
             if nome.contains("AlreadyConnected") || nome.contains("InProgress") {
-                if self.dual_permitido() {
-                    self.reconfigurar_dual(dispositivo).await;
-                }
+                // A negociação já está aberta ou em andamento. O endpoint local
+                // escolhe a configuração quando o BlueZ completar o AVDTP.
             } else {
                 self.c.log(format!("Não consegui abrir o áudio: {nome}"));
             }
@@ -594,24 +599,9 @@ impl Receptor {
         self.reconfigurar_dual(dispositivo).await;
     }
 
-    /// Pede ao endpoint do transmissor a config dual channel. Exige o guardião.
+    /// Reinicia o perfil A2DP. Na negociação seguinte, SelectConfiguration
+    /// escolhe a melhor configuração SBC comum entre receptor e transmissor.
     async fn reconfigurar_dual(self: &Arc<Self>, dispositivo: &str) {
-        let Ok(objs) = bluez::objetos(&self.conn).await else { return };
-        let Some((sep, caps)) = bluez::seps_sbc(&objs, dispositivo).into_iter().next() else {
-            return self.c.log("Endpoint SBC do transmissor não encontrado");
-        };
-        let Some(cfg) = sbc::escolher(&caps, true) else { return };
-        let Some(d) = sbc::descrever(&cfg) else { return };
-        if d.modo != Modo::Dual {
-            return self.c.log("O transmissor não anuncia dual channel; mantendo a configuração dele");
-        }
-        self.c.log(format!("Pedindo reconfiguração: SBC {}, bitpool {}, {} kbps", d.modo.nome(), d.bitpool, d.kbps));
-        let Ok(caminho) = ObjectPath::try_from(CAMINHO) else { return };
-        let props: HashMap<&str, Value> = HashMap::from([("Capabilities", Value::from(cfg.to_vec()))]);
-        match bluez::chamar(&self.conn, &sep, "org.bluez.MediaEndpoint1", "SetConfiguration", &(&caminho, props)).await
-        {
-            Ok(_) => self.c.log("Reconfiguração aceita pelo transmissor"),
-            Err(e) => self.c.log(format!("O transmissor recusou a reconfiguração: {}", bluez::nome_erro(&e))),
-        }
+        self.reabrir_a2dp(dispositivo).await;
     }
 }
