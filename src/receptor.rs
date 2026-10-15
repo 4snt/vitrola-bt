@@ -402,17 +402,83 @@ impl Receptor {
         }
         self.tentativas.lock().unwrap().remove(&d.caminho);
         self.travadas.lock().unwrap().remove(&d.caminho);
-        self.c.log("HI-FI: aguardando para renegociar SBC dual channel");
+        self.c.log("HI-FI: reconectando o dispositivo para renegociar SBC dual channel");
         let Ok(_guarda) = tokio::time::timeout(Duration::from_secs(15), self.guarda.lock()).await else {
             return self.c.log("HI-FI: conexão ocupada; tente novamente em alguns segundos");
         };
         self.tentativas.lock().unwrap().remove(&d.caminho);
         self.travadas.lock().unwrap().remove(&d.caminho);
-        if self.tem_fluxo_de(&d.caminho) {
-            self.reabrir_a2dp(&d.caminho).await;
-        } else {
-            self.abrir_a2dp(&d.caminho).await;
+        self.reconectar_completo_hifi(&d.caminho).await;
+    }
+
+    /// Equivale à ação do menu do sistema: derruba a conexão inteira do dispositivo,
+    /// espera o BlueZ confirmar a queda e reconecta o A2DP no sentido receptor.
+    async fn reconectar_completo_hifi(self: &Arc<Self>, dispositivo: &str) {
+        match bluez::chamar(&self.conn, dispositivo, "org.bluez.Device1", "Disconnect", &()).await {
+            Ok(_) => self.c.log("HI-FI: desconexão completa solicitada"),
+            Err(e) => self.c.log(format!("HI-FI: erro ao desconectar: {}", bluez::nome_erro(&e))),
         }
+
+        let desconectou = self.aguardar_conexao(dispositivo, false, Duration::from_secs(8)).await;
+        if !desconectou {
+            self.c.log("HI-FI: BlueZ não confirmou a desconexão; tentando reconectar mesmo assim");
+        }
+        self.tentativas.lock().unwrap().remove(dispositivo);
+        let conectado = bluez::chamar(
+            &self.conn,
+            dispositivo,
+            "org.bluez.Device1",
+            "ConnectProfile",
+            &(UUID_A2DP_SOURCE,),
+        )
+        .await;
+        if let Err(e) = conectado {
+            let nome = bluez::nome_erro(&e);
+            if !nome.contains("AlreadyConnected") && !nome.contains("InProgress") {
+                self.c.log(format!("HI-FI: falha ao reconectar A2DP: {nome}"));
+                return;
+            }
+        }
+
+        if !self.aguardar_conexao(dispositivo, true, Duration::from_secs(12)).await {
+            return self.c.log("HI-FI: o dispositivo não voltou a conectar; tente pelo menu do sistema");
+        }
+        self.c.log("HI-FI: dispositivo reconectado; aguardando endpoint SBC");
+
+        // Em alguns transmissores o SEP só reaparece depois da reconexão AVDTP.
+        // Aguarda esse endpoint e repete a solicitação se o primeiro pedido for cedo.
+        for tentativa in 0..6 {
+            let objs = match bluez::objetos(&self.conn).await {
+                Ok(objs) => objs,
+                Err(_) => {
+                    tokio::time::sleep(Duration::from_millis(700)).await;
+                    continue;
+                }
+            };
+            if !bluez::seps_sbc(&objs, dispositivo).is_empty() {
+                self.reconfigurar_dual(dispositivo).await;
+                return;
+            }
+            if tentativa < 5 {
+                tokio::time::sleep(Duration::from_millis(700)).await;
+            }
+        }
+        self.c.log("HI-FI: conectado, mas o endpoint SBC do transmissor não apareceu");
+    }
+
+    async fn aguardar_conexao(&self, dispositivo: &str, estado: bool, limite: Duration) -> bool {
+        let fim = tokio::time::Instant::now() + limite;
+        while tokio::time::Instant::now() < fim {
+            if bluez::objetos(&self.conn).await.is_ok_and(|objs| {
+                objs.iter().find(|(caminho, _)| caminho.as_str() == dispositivo)
+                    .and_then(|(_, ifs)| ifs.iter().find(|(nome, _)| nome.as_str() == "org.bluez.Device1"))
+                    .is_some_and(|(_, props)| bluez::como_bool(props, "Connected") == estado)
+            }) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        false
     }
 
     async fn parar_trabalhador(&self, transporte: &str) {
